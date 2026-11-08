@@ -2,6 +2,13 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.1] - 2026-11-08
+
+### Changed
+- The deploy pipeline is split into four Gitea repos with one pipeline each: evpn-3tier-switches (spines, leaves,
+  borders, wan), -firewalls, -loadbalancers, -servers. Each inventory lists only its devices; the runner `ansible` is
+  registered at user scope and serves all four. lab/evpn-3tier-ansible is archived. First runs: changed=0, 61/61.
+
 ## [0.6.0] - 2026-11-08
 
 ### Added

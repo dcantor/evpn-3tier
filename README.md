@@ -60,32 +60,33 @@ shell command on any node.
 5. Portal (8119), Lab Hub, NMS — **done (0.5.0)**
 6. Optional: L4 load-balancing experiments
 
-## CI/CD: Nautobot -> Ansible (Gitea lab/evpn-3tier-ansible)
+## CI/CD: Nautobot -> Ansible, four repos and pipelines on Gitea
 
-Since 0.6.0 the lab is **deployed from Nautobot by Ansible**, through a pipeline on the local Gitea:
-http://192.168.50.231:3000/lab/evpn-3tier-ansible (private; its README has the details).
+Since 0.6.0 the lab is **deployed from Nautobot by Ansible**; since 0.6.1 in four private Gitea repos, each with its own
+pipeline (the first, combined repo lab/evpn-3tier-ansible is archived):
 
-```
-Nautobot 10.0.0.10:8080 ──GraphQL──► inventory (committed to Gitea every run) ──► check --diff ──► apply ──► verify
-location evpn-3tier                  Jinja2 templates: every VyOS config         runner `ansible` on this host
-```
+| Repo (http://192.168.50.231:3000/lab/...) | Deploys | Workflow |
+|---|---|---|
+| `evpn-3tier-switches` | spine1-2, leaf1-4, border1-2, wan (VyOS) | deploy-switches |
+| `evpn-3tier-firewalls` | fw1, fw2 (VyOS: zones, policy, conntrack-sync) | deploy-firewalls |
+| `evpn-3tier-loadbalancers` | lb1, lb2 (HAProxy + keepalived) | deploy-loadbalancers |
+| `evpn-3tier-servers` | web1-2, app1-2, db1-2 (nginx, app, PostgreSQL) | deploy-servers |
+
+Each run (push to main, or Run workflow / `tools/pipeline.py run` in the repo): Nautobot GraphQL -> the inventory (only the
+repo's devices as hosts; the whole lab model in group_vars) -> **committed to the repo** (`[skip ci]`) -> render + drift
+report against lab.conf (VyOS repos) -> check mode with diff -> apply -> `lab.sh verify --quick` (the whole lab).
 
 - **Nautobot** (location / namespace / tenant group `evpn-3tier`): 19 devices `e3t-*` with roles, racks, platforms,
   primary IPs (Ansible's `ansible_host`), interfaces with MACs, cables (label = link kind), loopbacks, the servers' tier
-  addresses, VRFs with route targets, VLANs, prefixes; config context `evpn-3tier` for the plan Nautobot has no model
-  for (VNIs, transit / wan / sync plan, VIP, firewall policy, ES). Seeded from lab.conf by `tools/nautobot_seed.py`
-  (idempotent); after that, edits go to Nautobot.
-- **Ansible** (Gitea repo): `inventory/nautobot_inventory.py` rebuilds this lab's model from Nautobot (identical to
-  `lab.sh inventory` when seeded); `templates/vyos/*.j2` render every VyOS config (identical to tools/render.py, 11 of
-  11); playbooks deploy the VyOS helper scripts and configs, then the Linux network and the tiers (rolling).
-- **Runner:** `lab-host-ansible` (label `ansible`, user unit `gitea-runner-ansible`, host mode), toolchain in
-  `~/.local/share/e3t-ansible` (ansible-core 2.20, vyos.vyos 6.2, ansible.netcommon, ansible.utils, community.general).
-- **Pipeline** (push to main or Run workflow): inventory from Nautobot -> committed to Gitea (`[skip ci]`) -> render +
-  drift report against lab.conf -> check mode with diff -> apply -> `lab.sh verify --quick`; holds the test lock.
-  Proven: a value changed only in Nautobot (vrf_max_paths 32 -> 16) reached every leaf and border and verified 61/61.
-- `tools/pipeline.py status | run | log [N] | wait` (in the Gitea repo): the pipeline from the shell.
+  addresses, VRFs with route targets, VLANs, prefixes; config context `evpn-3tier` for the plan (VNIs, transit / wan /
+  sync, VIP, firewall policy, ES). Seeded from lab.conf by `tools/nautobot_seed.py` (idempotent); after that, edit Nautobot.
+- **Runner:** `lab-host-ansible` (label `ansible`, user scope: serves all four, one deploy at a time; user unit
+  `gitea-runner-ansible`, host mode), toolchain `~/.local/share/e3t-ansible` (ansible-core 2.20, vyos.vyos 6.2,
+  ansible.netcommon, ansible.utils, community.general). Every pipeline holds the lab's test lock while it deploys.
+- Proven: a value changed only in Nautobot (vrf_max_paths 32 -> 16 -> 32) reached every leaf and border and verified;
+  the four repos' first runs changed nothing (changed=0 on all 19 hosts) and verified 61/61.
 
-`lab.sh configure` / `services` still work (lab.conf); while Nautobot is edited they would push lab.conf's values back.
+`lab.sh configure` / `services` still work (lab.conf); once Nautobot is edited they would push lab.conf's values back.
 
 ## The portal, the Lab Hub, the NMS
 
