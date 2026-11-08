@@ -85,6 +85,10 @@ report against lab.conf (VyOS repos) -> check mode with diff -> apply -> `lab.sh
   ansible.netcommon, ansible.utils, community.general). Every pipeline holds the lab's test lock while it deploys.
 - Proven: a value changed only in Nautobot (vrf_max_paths 32 -> 16 -> 32) reached every leaf and border and verified;
   the four repos' first runs changed nothing (changed=0 on all 19 hosts) and verified 61/61.
+- **Managed deletions** (VyOS repos, since 0.7.0): after the push, what the templates no longer render is deleted from
+  the device (protected: system logins, console, syslog, hardware IDs, the loopback; at most 25 per node unless forced).
+  Proven through Nautobot: a firewall rule added to the policy in Nautobot appeared on fw1 and fw2 (firewalls run 3);
+  removed from Nautobot, the next run deleted `firewall ipv4 name OUTSIDE-WEB rule 40` from both (run 4), 61/61.
 
 `lab.sh configure` / `services` still work (lab.conf); once Nautobot is edited they would push lab.conf's values back.
 
