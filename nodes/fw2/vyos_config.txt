@@ -20,7 +20,7 @@ set interfaces bonding bond0 hash-policy layer3+4
 set interfaces bonding bond0 description 'ES 12: LACP to border1, border2'
 set interfaces bonding bond0 member interface eth1
 set interfaces bonding bond0 member interface eth2
-set interfaces ethernet eth3 address 172.31.255.1/31
+set interfaces ethernet eth3 address 172.31.255.2/29
 set interfaces ethernet eth3 description 'state sync: fw1'
 set protocols bgp system-as 65200
 set protocols bgp parameters router-id 10.61.0.32
@@ -87,3 +87,343 @@ set protocols bgp neighbor 172.16.199.3 remote-as 65122
 set protocols bgp neighbor 172.16.199.3 description 'border2 (outside)'
 set protocols bgp neighbor 172.16.199.3 bfd profile fabric
 set protocols bgp neighbor 172.16.199.3 address-family ipv4-unicast route-map export TO-OUTSIDE
+set firewall ipv4 name WEB-APP default-action drop
+set firewall ipv4 name WEB-APP default-log
+set firewall ipv4 name WEB-APP rule 1 action accept
+set firewall ipv4 name WEB-APP rule 1 state established
+set firewall ipv4 name WEB-APP rule 1 state related
+set firewall ipv4 name WEB-APP rule 1 description 'replies'
+set firewall ipv4 name WEB-APP rule 2 action drop
+set firewall ipv4 name WEB-APP rule 2 state invalid
+set firewall ipv4 name WEB-APP rule 2 description 'invalid'
+set firewall ipv4 name WEB-APP rule 10 action accept
+set firewall ipv4 name WEB-APP rule 10 protocol tcp
+set firewall ipv4 name WEB-APP rule 10 destination address 172.16.20.0/24
+set firewall ipv4 name WEB-APP rule 10 log
+set firewall ipv4 name WEB-APP rule 10 description 'web -> app 172.16.20.0/24 tcp 8080'
+set firewall ipv4 name WEB-APP rule 10 destination port 8080
+set firewall ipv4 name WEB-APP rule 10 state new
+set firewall zone APP from WEB firewall name WEB-APP
+set firewall ipv4 name WEB-DB default-action drop
+set firewall ipv4 name WEB-DB default-log
+set firewall ipv4 name WEB-DB rule 1 action accept
+set firewall ipv4 name WEB-DB rule 1 state established
+set firewall ipv4 name WEB-DB rule 1 state related
+set firewall ipv4 name WEB-DB rule 1 description 'replies'
+set firewall ipv4 name WEB-DB rule 2 action drop
+set firewall ipv4 name WEB-DB rule 2 state invalid
+set firewall ipv4 name WEB-DB rule 2 description 'invalid'
+set firewall zone DB from WEB firewall name WEB-DB
+set firewall ipv4 name WEB-OUTSIDE default-action drop
+set firewall ipv4 name WEB-OUTSIDE default-log
+set firewall ipv4 name WEB-OUTSIDE rule 1 action accept
+set firewall ipv4 name WEB-OUTSIDE rule 1 state established
+set firewall ipv4 name WEB-OUTSIDE rule 1 state related
+set firewall ipv4 name WEB-OUTSIDE rule 1 description 'replies'
+set firewall ipv4 name WEB-OUTSIDE rule 2 action drop
+set firewall ipv4 name WEB-OUTSIDE rule 2 state invalid
+set firewall ipv4 name WEB-OUTSIDE rule 2 description 'invalid'
+set firewall zone OUTSIDE from WEB firewall name WEB-OUTSIDE
+set firewall ipv4 name WEB-SYNC default-action drop
+set firewall ipv4 name WEB-SYNC default-log
+set firewall zone SYNC from WEB firewall name WEB-SYNC
+set firewall ipv4 name WEB-MGMT default-action drop
+set firewall ipv4 name WEB-MGMT default-log
+set firewall zone MGMT from WEB firewall name WEB-MGMT
+set firewall ipv4 name WEB-LOCAL default-action drop
+set firewall ipv4 name WEB-LOCAL default-log
+set firewall ipv4 name WEB-LOCAL rule 1 action accept
+set firewall ipv4 name WEB-LOCAL rule 1 state established
+set firewall ipv4 name WEB-LOCAL rule 1 state related
+set firewall ipv4 name WEB-LOCAL rule 1 description 'replies'
+set firewall ipv4 name WEB-LOCAL rule 2 action drop
+set firewall ipv4 name WEB-LOCAL rule 2 state invalid
+set firewall ipv4 name WEB-LOCAL rule 2 description 'invalid'
+set firewall ipv4 name WEB-LOCAL rule 10 action accept
+set firewall ipv4 name WEB-LOCAL rule 10 protocol tcp
+set firewall ipv4 name WEB-LOCAL rule 10 description 'BGP from the borders'
+set firewall ipv4 name WEB-LOCAL rule 10 destination port 179
+set firewall ipv4 name WEB-LOCAL rule 20 action accept
+set firewall ipv4 name WEB-LOCAL rule 20 protocol udp
+set firewall ipv4 name WEB-LOCAL rule 20 description 'BFD from the borders'
+set firewall ipv4 name WEB-LOCAL rule 20 destination port 3784-3785
+set firewall ipv4 name WEB-LOCAL rule 30 action accept
+set firewall ipv4 name WEB-LOCAL rule 30 protocol icmp
+set firewall ipv4 name WEB-LOCAL rule 30 description 'ping from the borders'
+set firewall zone LOCAL from WEB firewall name WEB-LOCAL
+set firewall ipv4 name APP-WEB default-action drop
+set firewall ipv4 name APP-WEB default-log
+set firewall ipv4 name APP-WEB rule 1 action accept
+set firewall ipv4 name APP-WEB rule 1 state established
+set firewall ipv4 name APP-WEB rule 1 state related
+set firewall ipv4 name APP-WEB rule 1 description 'replies'
+set firewall ipv4 name APP-WEB rule 2 action drop
+set firewall ipv4 name APP-WEB rule 2 state invalid
+set firewall ipv4 name APP-WEB rule 2 description 'invalid'
+set firewall zone WEB from APP firewall name APP-WEB
+set firewall ipv4 name APP-DB default-action drop
+set firewall ipv4 name APP-DB default-log
+set firewall ipv4 name APP-DB rule 1 action accept
+set firewall ipv4 name APP-DB rule 1 state established
+set firewall ipv4 name APP-DB rule 1 state related
+set firewall ipv4 name APP-DB rule 1 description 'replies'
+set firewall ipv4 name APP-DB rule 2 action drop
+set firewall ipv4 name APP-DB rule 2 state invalid
+set firewall ipv4 name APP-DB rule 2 description 'invalid'
+set firewall ipv4 name APP-DB rule 10 action accept
+set firewall ipv4 name APP-DB rule 10 protocol tcp
+set firewall ipv4 name APP-DB rule 10 destination address 172.16.30.0/24
+set firewall ipv4 name APP-DB rule 10 log
+set firewall ipv4 name APP-DB rule 10 description 'app -> db 172.16.30.0/24 tcp 5432'
+set firewall ipv4 name APP-DB rule 10 destination port 5432
+set firewall ipv4 name APP-DB rule 10 state new
+set firewall zone DB from APP firewall name APP-DB
+set firewall ipv4 name APP-OUTSIDE default-action drop
+set firewall ipv4 name APP-OUTSIDE default-log
+set firewall ipv4 name APP-OUTSIDE rule 1 action accept
+set firewall ipv4 name APP-OUTSIDE rule 1 state established
+set firewall ipv4 name APP-OUTSIDE rule 1 state related
+set firewall ipv4 name APP-OUTSIDE rule 1 description 'replies'
+set firewall ipv4 name APP-OUTSIDE rule 2 action drop
+set firewall ipv4 name APP-OUTSIDE rule 2 state invalid
+set firewall ipv4 name APP-OUTSIDE rule 2 description 'invalid'
+set firewall zone OUTSIDE from APP firewall name APP-OUTSIDE
+set firewall ipv4 name APP-SYNC default-action drop
+set firewall ipv4 name APP-SYNC default-log
+set firewall zone SYNC from APP firewall name APP-SYNC
+set firewall ipv4 name APP-MGMT default-action drop
+set firewall ipv4 name APP-MGMT default-log
+set firewall zone MGMT from APP firewall name APP-MGMT
+set firewall ipv4 name APP-LOCAL default-action drop
+set firewall ipv4 name APP-LOCAL default-log
+set firewall ipv4 name APP-LOCAL rule 1 action accept
+set firewall ipv4 name APP-LOCAL rule 1 state established
+set firewall ipv4 name APP-LOCAL rule 1 state related
+set firewall ipv4 name APP-LOCAL rule 1 description 'replies'
+set firewall ipv4 name APP-LOCAL rule 2 action drop
+set firewall ipv4 name APP-LOCAL rule 2 state invalid
+set firewall ipv4 name APP-LOCAL rule 2 description 'invalid'
+set firewall ipv4 name APP-LOCAL rule 10 action accept
+set firewall ipv4 name APP-LOCAL rule 10 protocol tcp
+set firewall ipv4 name APP-LOCAL rule 10 description 'BGP from the borders'
+set firewall ipv4 name APP-LOCAL rule 10 destination port 179
+set firewall ipv4 name APP-LOCAL rule 20 action accept
+set firewall ipv4 name APP-LOCAL rule 20 protocol udp
+set firewall ipv4 name APP-LOCAL rule 20 description 'BFD from the borders'
+set firewall ipv4 name APP-LOCAL rule 20 destination port 3784-3785
+set firewall ipv4 name APP-LOCAL rule 30 action accept
+set firewall ipv4 name APP-LOCAL rule 30 protocol icmp
+set firewall ipv4 name APP-LOCAL rule 30 description 'ping from the borders'
+set firewall zone LOCAL from APP firewall name APP-LOCAL
+set firewall ipv4 name DB-WEB default-action drop
+set firewall ipv4 name DB-WEB default-log
+set firewall ipv4 name DB-WEB rule 1 action accept
+set firewall ipv4 name DB-WEB rule 1 state established
+set firewall ipv4 name DB-WEB rule 1 state related
+set firewall ipv4 name DB-WEB rule 1 description 'replies'
+set firewall ipv4 name DB-WEB rule 2 action drop
+set firewall ipv4 name DB-WEB rule 2 state invalid
+set firewall ipv4 name DB-WEB rule 2 description 'invalid'
+set firewall zone WEB from DB firewall name DB-WEB
+set firewall ipv4 name DB-APP default-action drop
+set firewall ipv4 name DB-APP default-log
+set firewall ipv4 name DB-APP rule 1 action accept
+set firewall ipv4 name DB-APP rule 1 state established
+set firewall ipv4 name DB-APP rule 1 state related
+set firewall ipv4 name DB-APP rule 1 description 'replies'
+set firewall ipv4 name DB-APP rule 2 action drop
+set firewall ipv4 name DB-APP rule 2 state invalid
+set firewall ipv4 name DB-APP rule 2 description 'invalid'
+set firewall zone APP from DB firewall name DB-APP
+set firewall ipv4 name DB-OUTSIDE default-action drop
+set firewall ipv4 name DB-OUTSIDE default-log
+set firewall ipv4 name DB-OUTSIDE rule 1 action accept
+set firewall ipv4 name DB-OUTSIDE rule 1 state established
+set firewall ipv4 name DB-OUTSIDE rule 1 state related
+set firewall ipv4 name DB-OUTSIDE rule 1 description 'replies'
+set firewall ipv4 name DB-OUTSIDE rule 2 action drop
+set firewall ipv4 name DB-OUTSIDE rule 2 state invalid
+set firewall ipv4 name DB-OUTSIDE rule 2 description 'invalid'
+set firewall zone OUTSIDE from DB firewall name DB-OUTSIDE
+set firewall ipv4 name DB-SYNC default-action drop
+set firewall ipv4 name DB-SYNC default-log
+set firewall zone SYNC from DB firewall name DB-SYNC
+set firewall ipv4 name DB-MGMT default-action drop
+set firewall ipv4 name DB-MGMT default-log
+set firewall zone MGMT from DB firewall name DB-MGMT
+set firewall ipv4 name DB-LOCAL default-action drop
+set firewall ipv4 name DB-LOCAL default-log
+set firewall ipv4 name DB-LOCAL rule 1 action accept
+set firewall ipv4 name DB-LOCAL rule 1 state established
+set firewall ipv4 name DB-LOCAL rule 1 state related
+set firewall ipv4 name DB-LOCAL rule 1 description 'replies'
+set firewall ipv4 name DB-LOCAL rule 2 action drop
+set firewall ipv4 name DB-LOCAL rule 2 state invalid
+set firewall ipv4 name DB-LOCAL rule 2 description 'invalid'
+set firewall ipv4 name DB-LOCAL rule 10 action accept
+set firewall ipv4 name DB-LOCAL rule 10 protocol tcp
+set firewall ipv4 name DB-LOCAL rule 10 description 'BGP from the borders'
+set firewall ipv4 name DB-LOCAL rule 10 destination port 179
+set firewall ipv4 name DB-LOCAL rule 20 action accept
+set firewall ipv4 name DB-LOCAL rule 20 protocol udp
+set firewall ipv4 name DB-LOCAL rule 20 description 'BFD from the borders'
+set firewall ipv4 name DB-LOCAL rule 20 destination port 3784-3785
+set firewall ipv4 name DB-LOCAL rule 30 action accept
+set firewall ipv4 name DB-LOCAL rule 30 protocol icmp
+set firewall ipv4 name DB-LOCAL rule 30 description 'ping from the borders'
+set firewall zone LOCAL from DB firewall name DB-LOCAL
+set firewall ipv4 name OUTSIDE-WEB default-action drop
+set firewall ipv4 name OUTSIDE-WEB default-log
+set firewall ipv4 name OUTSIDE-WEB rule 1 action accept
+set firewall ipv4 name OUTSIDE-WEB rule 1 state established
+set firewall ipv4 name OUTSIDE-WEB rule 1 state related
+set firewall ipv4 name OUTSIDE-WEB rule 1 description 'replies'
+set firewall ipv4 name OUTSIDE-WEB rule 2 action drop
+set firewall ipv4 name OUTSIDE-WEB rule 2 state invalid
+set firewall ipv4 name OUTSIDE-WEB rule 2 description 'invalid'
+set firewall ipv4 name OUTSIDE-WEB rule 10 action accept
+set firewall ipv4 name OUTSIDE-WEB rule 10 protocol tcp
+set firewall ipv4 name OUTSIDE-WEB rule 10 destination address 172.16.10.10
+set firewall ipv4 name OUTSIDE-WEB rule 10 log
+set firewall ipv4 name OUTSIDE-WEB rule 10 description 'outside -> web 172.16.10.10 tcp 443'
+set firewall ipv4 name OUTSIDE-WEB rule 10 destination port 443
+set firewall ipv4 name OUTSIDE-WEB rule 10 state new
+set firewall ipv4 name OUTSIDE-WEB rule 20 action accept
+set firewall ipv4 name OUTSIDE-WEB rule 20 protocol tcp
+set firewall ipv4 name OUTSIDE-WEB rule 20 destination address 172.16.10.10
+set firewall ipv4 name OUTSIDE-WEB rule 20 log
+set firewall ipv4 name OUTSIDE-WEB rule 20 description 'outside -> web 172.16.10.10 tcp 80'
+set firewall ipv4 name OUTSIDE-WEB rule 20 destination port 80
+set firewall ipv4 name OUTSIDE-WEB rule 20 state new
+set firewall ipv4 name OUTSIDE-WEB rule 30 action accept
+set firewall ipv4 name OUTSIDE-WEB rule 30 protocol icmp
+set firewall ipv4 name OUTSIDE-WEB rule 30 destination address 172.16.10.10
+set firewall ipv4 name OUTSIDE-WEB rule 30 log
+set firewall ipv4 name OUTSIDE-WEB rule 30 description 'outside -> web 172.16.10.10 icmp'
+set firewall zone WEB from OUTSIDE firewall name OUTSIDE-WEB
+set firewall ipv4 name OUTSIDE-APP default-action drop
+set firewall ipv4 name OUTSIDE-APP default-log
+set firewall ipv4 name OUTSIDE-APP rule 1 action accept
+set firewall ipv4 name OUTSIDE-APP rule 1 state established
+set firewall ipv4 name OUTSIDE-APP rule 1 state related
+set firewall ipv4 name OUTSIDE-APP rule 1 description 'replies'
+set firewall ipv4 name OUTSIDE-APP rule 2 action drop
+set firewall ipv4 name OUTSIDE-APP rule 2 state invalid
+set firewall ipv4 name OUTSIDE-APP rule 2 description 'invalid'
+set firewall zone APP from OUTSIDE firewall name OUTSIDE-APP
+set firewall ipv4 name OUTSIDE-DB default-action drop
+set firewall ipv4 name OUTSIDE-DB default-log
+set firewall ipv4 name OUTSIDE-DB rule 1 action accept
+set firewall ipv4 name OUTSIDE-DB rule 1 state established
+set firewall ipv4 name OUTSIDE-DB rule 1 state related
+set firewall ipv4 name OUTSIDE-DB rule 1 description 'replies'
+set firewall ipv4 name OUTSIDE-DB rule 2 action drop
+set firewall ipv4 name OUTSIDE-DB rule 2 state invalid
+set firewall ipv4 name OUTSIDE-DB rule 2 description 'invalid'
+set firewall zone DB from OUTSIDE firewall name OUTSIDE-DB
+set firewall ipv4 name OUTSIDE-SYNC default-action drop
+set firewall ipv4 name OUTSIDE-SYNC default-log
+set firewall zone SYNC from OUTSIDE firewall name OUTSIDE-SYNC
+set firewall ipv4 name OUTSIDE-MGMT default-action drop
+set firewall ipv4 name OUTSIDE-MGMT default-log
+set firewall zone MGMT from OUTSIDE firewall name OUTSIDE-MGMT
+set firewall ipv4 name OUTSIDE-LOCAL default-action drop
+set firewall ipv4 name OUTSIDE-LOCAL default-log
+set firewall ipv4 name OUTSIDE-LOCAL rule 1 action accept
+set firewall ipv4 name OUTSIDE-LOCAL rule 1 state established
+set firewall ipv4 name OUTSIDE-LOCAL rule 1 state related
+set firewall ipv4 name OUTSIDE-LOCAL rule 1 description 'replies'
+set firewall ipv4 name OUTSIDE-LOCAL rule 2 action drop
+set firewall ipv4 name OUTSIDE-LOCAL rule 2 state invalid
+set firewall ipv4 name OUTSIDE-LOCAL rule 2 description 'invalid'
+set firewall ipv4 name OUTSIDE-LOCAL rule 10 action accept
+set firewall ipv4 name OUTSIDE-LOCAL rule 10 protocol tcp
+set firewall ipv4 name OUTSIDE-LOCAL rule 10 description 'BGP from the borders'
+set firewall ipv4 name OUTSIDE-LOCAL rule 10 destination port 179
+set firewall ipv4 name OUTSIDE-LOCAL rule 20 action accept
+set firewall ipv4 name OUTSIDE-LOCAL rule 20 protocol udp
+set firewall ipv4 name OUTSIDE-LOCAL rule 20 description 'BFD from the borders'
+set firewall ipv4 name OUTSIDE-LOCAL rule 20 destination port 3784-3785
+set firewall ipv4 name OUTSIDE-LOCAL rule 30 action accept
+set firewall ipv4 name OUTSIDE-LOCAL rule 30 protocol icmp
+set firewall ipv4 name OUTSIDE-LOCAL rule 30 description 'ping from the borders'
+set firewall zone LOCAL from OUTSIDE firewall name OUTSIDE-LOCAL
+set firewall ipv4 name SYNC-WEB default-action drop
+set firewall ipv4 name SYNC-WEB default-log
+set firewall zone WEB from SYNC firewall name SYNC-WEB
+set firewall ipv4 name SYNC-APP default-action drop
+set firewall ipv4 name SYNC-APP default-log
+set firewall zone APP from SYNC firewall name SYNC-APP
+set firewall ipv4 name SYNC-DB default-action drop
+set firewall ipv4 name SYNC-DB default-log
+set firewall zone DB from SYNC firewall name SYNC-DB
+set firewall ipv4 name SYNC-OUTSIDE default-action drop
+set firewall ipv4 name SYNC-OUTSIDE default-log
+set firewall zone OUTSIDE from SYNC firewall name SYNC-OUTSIDE
+set firewall ipv4 name SYNC-MGMT default-action drop
+set firewall ipv4 name SYNC-MGMT default-log
+set firewall zone MGMT from SYNC firewall name SYNC-MGMT
+set firewall ipv4 name SYNC-LOCAL default-action accept
+set firewall zone LOCAL from SYNC firewall name SYNC-LOCAL
+set firewall ipv4 name MGMT-WEB default-action drop
+set firewall ipv4 name MGMT-WEB default-log
+set firewall zone WEB from MGMT firewall name MGMT-WEB
+set firewall ipv4 name MGMT-APP default-action drop
+set firewall ipv4 name MGMT-APP default-log
+set firewall zone APP from MGMT firewall name MGMT-APP
+set firewall ipv4 name MGMT-DB default-action drop
+set firewall ipv4 name MGMT-DB default-log
+set firewall zone DB from MGMT firewall name MGMT-DB
+set firewall ipv4 name MGMT-OUTSIDE default-action drop
+set firewall ipv4 name MGMT-OUTSIDE default-log
+set firewall zone OUTSIDE from MGMT firewall name MGMT-OUTSIDE
+set firewall ipv4 name MGMT-SYNC default-action drop
+set firewall ipv4 name MGMT-SYNC default-log
+set firewall zone SYNC from MGMT firewall name MGMT-SYNC
+set firewall ipv4 name MGMT-LOCAL default-action accept
+set firewall zone LOCAL from MGMT firewall name MGMT-LOCAL
+set firewall ipv4 name LOCAL-WEB default-action accept
+set firewall zone WEB from LOCAL firewall name LOCAL-WEB
+set firewall ipv4 name LOCAL-APP default-action accept
+set firewall zone APP from LOCAL firewall name LOCAL-APP
+set firewall ipv4 name LOCAL-DB default-action accept
+set firewall zone DB from LOCAL firewall name LOCAL-DB
+set firewall ipv4 name LOCAL-OUTSIDE default-action accept
+set firewall zone OUTSIDE from LOCAL firewall name LOCAL-OUTSIDE
+set firewall ipv4 name LOCAL-SYNC default-action accept
+set firewall zone SYNC from LOCAL firewall name LOCAL-SYNC
+set firewall ipv4 name LOCAL-MGMT default-action accept
+set firewall zone MGMT from LOCAL firewall name LOCAL-MGMT
+set firewall zone WEB default-action drop
+set firewall zone WEB intra-zone-filtering action accept
+set firewall zone WEB member interface bond0.110
+set firewall zone APP default-action drop
+set firewall zone APP intra-zone-filtering action accept
+set firewall zone APP member interface bond0.120
+set firewall zone DB default-action drop
+set firewall zone DB intra-zone-filtering action accept
+set firewall zone DB member interface bond0.130
+set firewall zone OUTSIDE default-action drop
+set firewall zone OUTSIDE intra-zone-filtering action accept
+set firewall zone OUTSIDE member interface bond0.199
+set firewall zone SYNC default-action drop
+set firewall zone SYNC intra-zone-filtering action accept
+set firewall zone SYNC member interface eth3
+set firewall zone MGMT default-action drop
+set firewall zone MGMT intra-zone-filtering action accept
+set firewall zone MGMT member interface eth0
+set firewall zone LOCAL local-zone
+set firewall zone LOCAL default-action drop
+set high-availability vrrp group FWSYNC vrid 30
+set high-availability vrrp group FWSYNC interface eth3
+set high-availability vrrp group FWSYNC address 172.31.255.6/29
+set high-availability vrrp group FWSYNC priority 100
+set high-availability vrrp group FWSYNC advertise-interval 1
+set high-availability vrrp group FWSYNC description 'which firewall is active, for conntrack-sync'
+set high-availability vrrp sync-group FW member FWSYNC
+set service conntrack-sync interface eth3 peer 172.31.255.1
+set service conntrack-sync failover-mechanism vrrp sync-group FW
+set service conntrack-sync accept-protocol tcp
+set service conntrack-sync accept-protocol udp
+set service conntrack-sync accept-protocol icmp
+set service conntrack-sync disable-external-cache

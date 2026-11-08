@@ -2,6 +2,17 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] - 2026-11-08
+
+### Added
+- Phase 2: the firewall policy (lab.conf `FW_POLICY`) as VyOS zones on fw1 / fw2 — per-VRF zones, SYNC, MGMT, LOCAL;
+  replies pass, only the listed flows start, the rest dropped and logged.
+- conntrack-sync between the firewalls over the sync link (now 172.31.255.0/29), tied to VRRP group FWSYNC.
+- `./lab.sh verify`: 57 checks — fabric sessions, BFD, Ethernet Segments, firewall sessions, fw1 as next hop, VRRP
+  master, data plane, and the policy matrix (temporary listeners; every flow open exactly when the policy allows it).
+- `./lab.sh fw-failover`: fw1 powered off and back under a live connection; measured 1.8 s pause each way, no reset.
+- tools/labssh.py: shared SSH helper (retries sshd's MaxStartups throttling).
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

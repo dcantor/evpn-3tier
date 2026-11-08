@@ -32,6 +32,9 @@ for line in sys.stdin:
         linux[name] = {"vlan": int(vid), "hostnum": int(hostnum), "es": int(es)}
     elif f[0] == "FWES":
         fw_es[f[1]] = int(f[2])
+    elif f[0] == "FWPOLICY":
+        _, src, dst, proto, port, to = f
+        lab.setdefault("fw_policy", []).append({"from": src, "to": dst, "proto": proto, "port": None if port == "-" else port, "dest": to})
     elif f[0] == "ESCONF":
         lab["es"] = {"sys_mac_prefix": f[1], "df_pref": [int(x) for x in f[2:]]}
     elif f[0] == "NODE":
@@ -91,5 +94,8 @@ for b in by_role("border"):
                    "border_ip": f"{base}.0/31", "wan_ip": f"{base}.1/31"})
 lab["wan"]["links"] = wl
 sync = ipaddress.ip_network(lab["wan"]["sync_net"])
-lab["wan"]["sync"] = {fw["name"]: f"{sync.network_address + i}/{sync.prefixlen}" for i, fw in enumerate(by_role("fw"))}
+lab["wan"]["sync"] = {fw["name"]: f"{sync.network_address + fw['fw_no']}/{sync.prefixlen}" for fw in by_role("fw")}
+lab["wan"]["sync_vip"] = f"{sync.broadcast_address - 1}/{sync.prefixlen}"
+for r in lab.get("fw_policy", []):
+    if r["dest"] == "VIP": r["dest"] = lab["web_vip"]
 print(json.dumps({**lab, "nodes": list(nodes.values()), "links": links}, indent=1))

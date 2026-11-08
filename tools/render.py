@@ -69,6 +69,8 @@ def render(inv, node):
         out += edge(inv, n)
     if n["role"] == "fw":
         out += firewall(inv, n)
+        out += fw_policy(inv, n)
+        out += fw_sync(inv, n)
     if n["role"] == "wan":
         out += wan(inv, n)
     return "\n".join(out) + "\n"
@@ -272,6 +274,72 @@ def firewall(inv, n):
             if t["vrf"] != "outside":   # FRR's default-originate skips the export route-map: fw2 prepends through its own
                 out.append(f"{nb} address-family ipv4-unicast default-originate" + (" route-map ORIGINATE" if standby else ""))
     return out
+
+
+def fw_zones(inv, n):
+    """{ZONE: [interfaces]}: one per VRF (its transit VLAN), SYNC (the link to the other firewall), MGMT (eth0). MGMT
+    must be a zone: an interface in none is dropped by LOCAL's default action (evpn-clab 0.12.0)."""
+    z = {t["vrf"].upper(): [f"bond0.{t['vlan']}"] for t in inv["evpn"]["transit"]}
+    z["SYNC"] = [p["name"] for p in n["ports"] if p.get("kind") == "sync"]
+    z["MGMT"] = ["eth0"]
+    return z
+
+
+def fw_policy(inv, n):
+    """The zone-based firewall (lab.conf FW_POLICY): replies always pass; between VRF zones only what the policy lists
+    may start, everything else is dropped and logged. To the firewall itself: BGP, BFD and ping from the transit VLANs;
+    anything from MGMT and SYNC. From the firewall: anything."""
+    z = fw_zones(inv, n); names = list(z) + ["LOCAL"]; c = []
+    for src in names:
+        for dst in names:
+            if src == dst: continue
+            fw = f"{src}-{dst}"; name = f"set firewall ipv4 name {fw}"
+            if src == "LOCAL" or src in ("MGMT", "SYNC") and dst == "LOCAL":
+                c.append(f"{name} default-action accept")
+            elif src in ("MGMT", "SYNC") or dst in ("MGMT", "SYNC"):     # nothing is routed to or from the management / sync links
+                c += [f"{name} default-action drop", f"{name} default-log"]
+            else:
+                c += [f"{name} default-action drop", f"{name} default-log",
+                      f"{name} rule 1 action accept", f"{name} rule 1 state established", f"{name} rule 1 state related",
+                      f"{name} rule 1 description 'replies'",
+                      f"{name} rule 2 action drop", f"{name} rule 2 state invalid", f"{name} rule 2 description 'invalid'"]
+                if dst == "LOCAL":
+                    for i, (proto, port, what) in enumerate([("tcp", "179", "BGP"), ("udp", "3784-3785", "BFD"), ("icmp", None, "ping")], 1):
+                        r = f"{name} rule {10 * i}"
+                        c += [f"{r} action accept", f"{r} protocol {proto}", f"{r} description '{what} from the borders'"]
+                        if port: c.append(f"{r} destination port {port}")
+                else:
+                    i = 10
+                    for p in inv.get("fw_policy", []):
+                        if (p["from"].upper(), p["to"].upper()) != (src, dst): continue
+                        r = f"{name} rule {i}"
+                        c += [f"{r} action accept", f"{r} protocol {p['proto']}", f"{r} destination address {p['dest']}", f"{r} log",
+                              f"{r} description '{p['from']} -> {p['to']} {p['dest']} {p['proto']}{' ' + p['port'] if p['port'] else ''}'"]
+                        if p["port"]: c.append(f"{r} destination port {p['port']}")
+                        if p["proto"] == "tcp": c.append(f"{r} state new")
+                        i += 10
+            c.append(f"set firewall zone {dst} from {src} firewall name {fw}")
+    for zone, ifs in z.items():
+        c += [f"set firewall zone {zone} default-action drop", f"set firewall zone {zone} intra-zone-filtering action accept",
+              *[f"set firewall zone {zone} member interface {i}" for i in ifs]]
+    c += ["set firewall zone LOCAL local-zone", "set firewall zone LOCAL default-action drop"]
+    return c
+
+
+def fw_sync(inv, n):
+    """Connection-state sync to the other firewall (conntrackd over the sync link, unicast to the peer). VyOS ties it to
+    VRRP: the VRRP master's conntrackd commits the states it learnt from the peer into its kernel when it takes over.
+    The VRRP group lives on the sync link only, its address unused: fw1 (priority 200) is master while it lives."""
+    me = n["name"]; sync = next(p["name"] for p in n["ports"] if p.get("kind") == "sync")
+    peer = next(ip for f, ip in inv["wan"]["sync"].items() if f != me).split("/")[0]
+    g = "set high-availability vrrp group FWSYNC"; cs = "set service conntrack-sync"
+    return [f"{g} vrid 30", f"{g} interface {sync}", f"{g} address {inv['wan']['sync_vip']}",
+            f"{g} priority {200 if n['fw_no'] == 1 else 100}", f"{g} advertise-interval 1",
+            f"{g} description 'which firewall is active, for conntrack-sync'",
+            "set high-availability vrrp sync-group FW member FWSYNC",
+            f"{cs} interface {sync} peer {peer}", f"{cs} failover-mechanism vrrp sync-group FW",
+            f"{cs} accept-protocol tcp", f"{cs} accept-protocol udp", f"{cs} accept-protocol icmp",
+            f"{cs} disable-external-cache"]
 
 
 def wan(inv, n):

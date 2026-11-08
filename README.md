@@ -37,6 +37,8 @@ tools/build_image.sh    # once: images/e3t-alpine.qcow2
 ./lab.sh bootstrap      # first boot only: day-0 config over the serial consoles (~5 min, parallel)
 ./lab.sh configure      # re-apply the VyOS configs; Linux VMs: bond, VLAN, default route
 ./lab.sh check-wiring   # every link reaches the peer port lab.conf names
+./lab.sh verify         # 57 checks: fabric, firewall sessions + fw1 preferred, data plane, the policy matrix
+./lab.sh fw-failover    # power fw1 off under a live web1 -> app1 connection, and back (~4 min)
 ./lab.sh status
 ./lab.sh down
 ```
@@ -47,17 +49,32 @@ shell command on any node.
 ## Plan
 
 0. Image, topology, lab.sh — **done (0.1.0)**
-1. Fabric, VRFs, ESI-LAG — **done (0.1.0)**; `verify` still to write
-2. Firewall policy (zones, per-tier rules), conntrack-sync, fw failover
+1. Fabric, VRFs, ESI-LAG — **done (0.1.0)**
+2. Firewall policy (zones, per-tier rules), conntrack-sync, fw failover — **done (0.2.0)**
 3. HAProxy + keepalived (web VIP), nginx, the app tier, PostgreSQL primary + replica
 4. Failure tests and the Robot suite
 5. Portal (8119), Lab Hub, NMS
 6. Optional: L4 load-balancing experiments
+
+## The firewalls
+
+lab.conf `FW_POLICY` is the policy; tools/render.py turns it into VyOS zones: WEB, APP, DB, OUTSIDE (each VRF's transit
+VLAN), SYNC (fw1 <-> fw2), MGMT (eth0) and LOCAL. Replies always pass; new connections between zones only as listed —
+outside -> web VIP 443 / 80 / ping, web -> app 8080, app -> db 5432 — the rest dropped and logged. The firewalls accept
+BGP / BFD / ping from the borders.
+
+**Failover.** fw1 is preferred (fw2 prepends its AS twice on everything it sends). conntrackd copies connection states
+over the sync link (172.31.255.0/29); VyOS ties it to VRRP (group FWSYNC on the sync link, fw1 priority 200). Measured
+(`./lab.sh fw-failover`): fw1 powered off -> the live connection pauses 1.8 s (BFD 1.5 s + BGP) and carries on through
+fw2; fw1 back -> 1.8 s again, back through fw1. Not yet covered: after a fail-back the standby learns only connections
+whose state changes, so a long-idle connection may be missing on it until then (phase 4: double failover).
 
 ## Things that are not obvious
 
 - **No /32s to the firewalls.** advertise-svi-ip puts the other border's transit address into the VRF as a /32; exported
   to the firewalls it routed their BFD / BGP to that border through this one (TTL - 1, the sessions died). See TO-FW.
 - **VLAN IDs stop at 4094.** VyOS dropped VLAN 4099 lines without an error.
+- **`pkill -f` from a script started over SSH:** a pattern that also matches the shell's own command line (the program
+  started in the same command) kills the session. Kill in a separate SSH call, with `[e]3t-...` patterns.
 - **libvirt `<serial type='file'>` logs are root-only;** the image builder uses a pty with `<log append='on'>`.
 - Everything else about the overlay comes from evpn-fabric (docs/phase0-findings.md there).

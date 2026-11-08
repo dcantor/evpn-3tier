@@ -288,6 +288,7 @@ cmd_inventory() {  # the lab as JSON (tools/inventory.py) — what the renderer,
     for v in "${TRANSIT[@]}"; do echo "TRANSIT $v"; done
     for v in "${LINUX_NET[@]}"; do echo "LINUXNET $v"; done
     for n in "${!FW_ES[@]}"; do echo "FWES $n ${FW_ES[$n]}"; done
+    for v in "${FW_POLICY[@]}"; do echo "FWPOLICY $v"; done
     echo "ESCONF $ES_SYS_MAC_PREFIX ${ES_DF_PREF[*]}"
     for n in "${ALL_NODES[@]}"; do
       echo "NODE $n ${ROLE[$n]} ${NODE_IDX[$n]} ${MGMT_IP[$n]} ${CONSOLE_PORT[$n]} ${BGP_AS[$n]:--} ${LOOPBACK[$n]:--} ${RACK[$n]} $(dom "$n") $(mac "$n" 0)"
@@ -306,6 +307,7 @@ cmd_ssh() {
 cmd_show() { local n="${1:?node}"; shift; known "$n"; is_vyos "$n" || die "$n is not a VyOS node"; need_python; "$PY" "$LAB_DIR/tools/vyos_cmd.py" "${MGMT_IP[$n]}" "$*"; }
 cmd_log() { tail -n "${2:-50}" -f "$(node_dir "${1:?node}")/console.log"; }
 cmd_verify() { need_python; "$PY" "$LAB_DIR/tools/verify.py" "$@"; }   # control plane + data plane, end to end
+cmd_fw-failover() { need_python; "$PY" "$LAB_DIR/tools/fw_failover.py" "$@"; }   # power fw1 off under a live connection, then back
 cmd_check-wiring() { need_python; "$PY" "$LAB_DIR/tools/check_wiring.py"; }   # every link reaches the peer lab.conf says
 
 usage() {
@@ -324,7 +326,8 @@ usage: $(basename "$0") <command> [node...]
   show <node> <cmd>  run a VyOS operational command (e.g. show bgp summary)
   log <node> [n]     follow a node's console log
   check-wiring       prove every link reaches the peer port lab.conf names (by MAC; bond legs by LACP partner)
-  verify             control plane and data plane checks
+  verify [--quick]   fabric, firewall sessions and preference, data plane, the firewall policy matrix (--quick: no matrix)
+  fw-failover        one TCP connection web1 -> app1 while fw1 is powered off and back: gaps, survival
   rebuild [node..]   re-generate domain XML / Linux seeds (keeps disks)
   clean [node..]     stop, undefine and delete overlay disks
 nodes: ${ALL_NODES[*]}
@@ -333,6 +336,6 @@ U
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify) "cmd_$cmd" "$@" ;;
+  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover) "cmd_$cmd" "$@" ;;
   *) usage; exit 1 ;;
 esac
