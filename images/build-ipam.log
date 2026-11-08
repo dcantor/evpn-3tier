@@ -1,4 +1,0 @@
-builder started (NAT network: Docker, phpipam/phpipam-www:v1.8.3, mariadb:11.8.8) ...
-/phpipam/db/SCHEMA.sql
-built /home/dcantor/evpn-3tier/images/e3t-ipam.qcow2 (521M); phpIPAM phpipam/phpipam-www:v1.8.3, MariaDB mariadb:11.8.8; user lab / lab
-exit=0

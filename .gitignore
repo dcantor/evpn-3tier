@@ -20,3 +20,4 @@ results-run.log
 webapp/.venv/
 webapp/runs/
 images/.ipam-builder/
+images/*.log
