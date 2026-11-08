@@ -2,6 +2,13 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.1] - 2026-11-08
+
+### Fixed
+- Suite 06's limits: requests in flight on lb1 / web1 when it loses power are lost (only new connections are rerouted);
+  the first full run from the portal lost 4 and 1 against a limit of 0. Now at most 8 / 5 reads, still no gap over 1 s.
+  Full run from the portal: 14 of 14.
+
 ## [0.5.0] - 2026-11-08
 
 ### Added

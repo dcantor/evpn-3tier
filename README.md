@@ -124,15 +124,17 @@ connection through the firewall to the VIP; one component is powered off for 20 
 
 | Scenario | What takes over | Lost while down | Longest gap | Back |
 |---|---|---|---|---|
-| lb1 off | keepalived: VIP (virtual MAC) to lb2 | 0 | 0.1 s | 0 lost |
-| web1 off | HAProxy health check + redispatch | 0 | 0.1 s | 0 lost |
+| lb1 off | keepalived: VIP (virtual MAC) to lb2 | 0-4 (in flight) | 0.1 s | 0 lost |
+| web1 off | HAProxy health check + redispatch | 0-1 (in flight) | 0.1 s | 0 lost |
 | app1 off | nginx: the other app server | 0 | 0.1 s | 0 lost |
 | fw1 off | BFD + BGP: every VRF to fw2; conntrack-sync | 0 | 0.1 s | 0 lost |
 | leaf1 off | EVPN multihoming: the servers' other leg | 0 | 0.1 s | 0 lost |
 | border1 off | border2 for firewalls, load balancers, wan | 4 reads | 0.3 s | 0 lost |
 | db1 off, db2 promoted 5 s later | the app finds the new primary itself | 32 reads, 3 writes | 3.3 s | switched back |
 
-The Robot suites (tests/suites/01-09) assert these with some room; 06-09 are tagged `disruptive`.
+Requests in flight on a server at the instant it loses power cannot be saved (failover reroutes new connections), so
+lb1 / web1 lose a few now and then. The Robot suites (tests/suites/01-09) assert these with some room; 06-09 are tagged
+`disruptive`. Last full run (0.5.1, from the portal): 14 of 14.
 
 ## Things that are not obvious
 
