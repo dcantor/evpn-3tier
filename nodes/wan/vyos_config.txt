@@ -1,0 +1,47 @@
+# wan — wan in wan (evpn-3tier); rendered by tools/render.py from lab.conf
+set system host-name wan
+set interfaces ethernet eth0 address 10.18.0.45/24
+set interfaces ethernet eth0 description 'OOB management'
+set protocols static route 10.0.0.0/8 next-hop 10.18.0.1
+set service ssh port 22
+set system ip multipath layer4-hashing
+set system ipv6 multipath layer4-hashing
+set protocols bfd profile fabric interval transmit 300
+set protocols bfd profile fabric interval receive 300
+set protocols bfd profile fabric interval multiplier 5
+set interfaces dummy dum0 address 10.61.0.41/32
+set interfaces dummy dum0 description 'loopback / router-id'
+set interfaces ethernet eth1 description 'wan: border1 eth7'
+set interfaces ethernet eth2 description 'wan: border2 eth7'
+set interfaces ethernet eth3 description 'NAT uplink'
+set interfaces ethernet eth3 address dhcp
+set interfaces dummy dum1 address 198.51.100.1/24
+set interfaces dummy dum1 description 'the test clients (curl --interface 198.51.100.1)'
+set protocols bgp system-as 65000
+set protocols bgp parameters router-id 10.61.0.41
+set protocols bgp address-family ipv4-unicast network 198.51.100.0/24
+set protocols bgp parameters log-neighbor-changes
+set policy prefix-list FROM-DC rule 10 action permit
+set policy prefix-list FROM-DC rule 10 prefix 172.16.0.0/16
+set policy prefix-list FROM-DC rule 10 le 32
+set policy prefix-list TO-DC rule 10 action permit
+set policy prefix-list TO-DC rule 10 prefix 0.0.0.0/0
+set policy prefix-list TO-DC rule 20 action permit
+set policy prefix-list TO-DC rule 20 prefix 198.51.100.0/24
+set nat source rule 100 outbound-interface name eth3
+set nat source rule 100 translation address masquerade
+set nat source rule 100 description 'the data centre out to the real internet'
+set interfaces ethernet eth1 address 172.31.1.1/31
+set protocols bgp neighbor 172.31.1.0 remote-as 65121
+set protocols bgp neighbor 172.31.1.0 description 'border1 eth7'
+set protocols bgp neighbor 172.31.1.0 bfd profile fabric
+set protocols bgp neighbor 172.31.1.0 address-family ipv4-unicast default-originate
+set protocols bgp neighbor 172.31.1.0 address-family ipv4-unicast prefix-list import FROM-DC
+set protocols bgp neighbor 172.31.1.0 address-family ipv4-unicast prefix-list export TO-DC
+set interfaces ethernet eth2 address 172.31.2.1/31
+set protocols bgp neighbor 172.31.2.0 remote-as 65122
+set protocols bgp neighbor 172.31.2.0 description 'border2 eth7'
+set protocols bgp neighbor 172.31.2.0 bfd profile fabric
+set protocols bgp neighbor 172.31.2.0 address-family ipv4-unicast default-originate
+set protocols bgp neighbor 172.31.2.0 address-family ipv4-unicast prefix-list import FROM-DC
+set protocols bgp neighbor 172.31.2.0 address-family ipv4-unicast prefix-list export TO-DC

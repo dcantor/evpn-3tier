@@ -1,0 +1,67 @@
+# spine1 — spine in spine (evpn-3tier); rendered by tools/render.py from lab.conf
+set system host-name spine1
+set interfaces ethernet eth0 address 10.18.0.11/24
+set interfaces ethernet eth0 description 'OOB management'
+set protocols static route 10.0.0.0/8 next-hop 10.18.0.1
+set service ssh port 22
+set system ip multipath layer4-hashing
+set system ipv6 multipath layer4-hashing
+set protocols bfd profile fabric interval transmit 300
+set protocols bfd profile fabric interval receive 300
+set protocols bfd profile fabric interval multiplier 5
+set interfaces dummy dum0 address 10.61.0.1/32
+set interfaces dummy dum0 description 'loopback / router-id'
+set interfaces ethernet eth1 description 'fabric: leaf1 eth1'
+set interfaces ethernet eth1 mtu 9000
+set interfaces ethernet eth2 description 'fabric: leaf2 eth1'
+set interfaces ethernet eth2 mtu 9000
+set interfaces ethernet eth3 description 'fabric: leaf3 eth1'
+set interfaces ethernet eth3 mtu 9000
+set interfaces ethernet eth4 description 'fabric: leaf4 eth1'
+set interfaces ethernet eth4 mtu 9000
+set interfaces ethernet eth5 description 'fabric: border1 eth1'
+set interfaces ethernet eth5 mtu 9000
+set interfaces ethernet eth6 description 'fabric: border2 eth1'
+set interfaces ethernet eth6 mtu 9000
+set protocols bgp system-as 65100
+set protocols bgp parameters router-id 10.61.0.1
+set protocols bgp address-family ipv4-unicast network 10.61.0.1/32
+set protocols bgp address-family ipv4-unicast maximum-paths ebgp 4
+set protocols bgp parameters bestpath as-path multipath-relax
+set protocols bgp parameters log-neighbor-changes
+set protocols bgp neighbor eth1 interface remote-as external
+set protocols bgp neighbor eth1 description 'leaf1'
+set protocols bgp neighbor eth1 bfd profile fabric
+set protocols bgp neighbor eth1 address-family ipv4-unicast
+set protocols bgp neighbor eth1 address-family l2vpn-evpn
+set protocols bgp neighbor eth1 address-family l2vpn-evpn attribute-unchanged next-hop
+set protocols bgp neighbor eth2 interface remote-as external
+set protocols bgp neighbor eth2 description 'leaf2'
+set protocols bgp neighbor eth2 bfd profile fabric
+set protocols bgp neighbor eth2 address-family ipv4-unicast
+set protocols bgp neighbor eth2 address-family l2vpn-evpn
+set protocols bgp neighbor eth2 address-family l2vpn-evpn attribute-unchanged next-hop
+set protocols bgp neighbor eth3 interface remote-as external
+set protocols bgp neighbor eth3 description 'leaf3'
+set protocols bgp neighbor eth3 bfd profile fabric
+set protocols bgp neighbor eth3 address-family ipv4-unicast
+set protocols bgp neighbor eth3 address-family l2vpn-evpn
+set protocols bgp neighbor eth3 address-family l2vpn-evpn attribute-unchanged next-hop
+set protocols bgp neighbor eth4 interface remote-as external
+set protocols bgp neighbor eth4 description 'leaf4'
+set protocols bgp neighbor eth4 bfd profile fabric
+set protocols bgp neighbor eth4 address-family ipv4-unicast
+set protocols bgp neighbor eth4 address-family l2vpn-evpn
+set protocols bgp neighbor eth4 address-family l2vpn-evpn attribute-unchanged next-hop
+set protocols bgp neighbor eth5 interface remote-as external
+set protocols bgp neighbor eth5 description 'border1'
+set protocols bgp neighbor eth5 bfd profile fabric
+set protocols bgp neighbor eth5 address-family ipv4-unicast
+set protocols bgp neighbor eth5 address-family l2vpn-evpn
+set protocols bgp neighbor eth5 address-family l2vpn-evpn attribute-unchanged next-hop
+set protocols bgp neighbor eth6 interface remote-as external
+set protocols bgp neighbor eth6 description 'border2'
+set protocols bgp neighbor eth6 bfd profile fabric
+set protocols bgp neighbor eth6 address-family ipv4-unicast
+set protocols bgp neighbor eth6 address-family l2vpn-evpn
+set protocols bgp neighbor eth6 address-family l2vpn-evpn attribute-unchanged next-hop

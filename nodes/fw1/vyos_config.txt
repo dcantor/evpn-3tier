@@ -1,0 +1,85 @@
+# fw1 — fw in edge (evpn-3tier); rendered by tools/render.py from lab.conf
+set system host-name fw1
+set interfaces ethernet eth0 address 10.18.0.41/24
+set interfaces ethernet eth0 description 'OOB management'
+set protocols static route 10.0.0.0/8 next-hop 10.18.0.1
+set service ssh port 22
+set system ip multipath layer4-hashing
+set system ipv6 multipath layer4-hashing
+set protocols bfd profile fabric interval transmit 300
+set protocols bfd profile fabric interval receive 300
+set protocols bfd profile fabric interval multiplier 5
+set interfaces dummy dum0 address 10.61.0.31/32
+set interfaces dummy dum0 description 'loopback / router-id'
+set interfaces ethernet eth1 description 'access: border1 eth3'
+set interfaces ethernet eth2 description 'access: border2 eth3'
+set interfaces ethernet eth3 description 'sync: fw2 eth3'
+set interfaces bonding bond0 mode 802.3ad
+set interfaces bonding bond0 lacp-rate fast
+set interfaces bonding bond0 hash-policy layer3+4
+set interfaces bonding bond0 description 'ES 11: LACP to border1, border2'
+set interfaces bonding bond0 member interface eth1
+set interfaces bonding bond0 member interface eth2
+set interfaces ethernet eth3 address 172.31.255.0/31
+set interfaces ethernet eth3 description 'state sync: fw2'
+set protocols bgp system-as 65200
+set protocols bgp parameters router-id 10.61.0.31
+set protocols bgp address-family ipv4-unicast maximum-paths ebgp 4
+set protocols bgp parameters bestpath as-path multipath-relax
+set protocols bgp parameters log-neighbor-changes
+set policy prefix-list DEFAULT-ONLY rule 10 action permit
+set policy prefix-list DEFAULT-ONLY rule 10 prefix 0.0.0.0/0
+set policy prefix-list DEFAULT-ONLY description 'what a tier VRF gets from the firewall: the default route'
+set policy prefix-list PUBLIC rule 10 action permit
+set policy prefix-list PUBLIC rule 10 prefix 172.16.10.0/24
+set policy prefix-list PUBLIC description 'what outside gets from the firewall: the web VLAN only'
+set policy route-map TO-TIER rule 10 action permit
+set policy route-map TO-TIER rule 10 match ip address prefix-list DEFAULT-ONLY
+set policy route-map TO-OUTSIDE rule 10 action permit
+set policy route-map TO-OUTSIDE rule 10 match ip address prefix-list PUBLIC
+set interfaces bonding bond0 vif 110 address 172.16.110.11/28
+set interfaces bonding bond0 vif 110 description 'transit web'
+set protocols bgp neighbor 172.16.110.2 remote-as 65121
+set protocols bgp neighbor 172.16.110.2 description 'border1 (web)'
+set protocols bgp neighbor 172.16.110.2 bfd profile fabric
+set protocols bgp neighbor 172.16.110.2 address-family ipv4-unicast route-map export TO-TIER
+set protocols bgp neighbor 172.16.110.2 address-family ipv4-unicast default-originate
+set protocols bgp neighbor 172.16.110.3 remote-as 65122
+set protocols bgp neighbor 172.16.110.3 description 'border2 (web)'
+set protocols bgp neighbor 172.16.110.3 bfd profile fabric
+set protocols bgp neighbor 172.16.110.3 address-family ipv4-unicast route-map export TO-TIER
+set protocols bgp neighbor 172.16.110.3 address-family ipv4-unicast default-originate
+set interfaces bonding bond0 vif 120 address 172.16.120.11/28
+set interfaces bonding bond0 vif 120 description 'transit app'
+set protocols bgp neighbor 172.16.120.2 remote-as 65121
+set protocols bgp neighbor 172.16.120.2 description 'border1 (app)'
+set protocols bgp neighbor 172.16.120.2 bfd profile fabric
+set protocols bgp neighbor 172.16.120.2 address-family ipv4-unicast route-map export TO-TIER
+set protocols bgp neighbor 172.16.120.2 address-family ipv4-unicast default-originate
+set protocols bgp neighbor 172.16.120.3 remote-as 65122
+set protocols bgp neighbor 172.16.120.3 description 'border2 (app)'
+set protocols bgp neighbor 172.16.120.3 bfd profile fabric
+set protocols bgp neighbor 172.16.120.3 address-family ipv4-unicast route-map export TO-TIER
+set protocols bgp neighbor 172.16.120.3 address-family ipv4-unicast default-originate
+set interfaces bonding bond0 vif 130 address 172.16.130.11/28
+set interfaces bonding bond0 vif 130 description 'transit db'
+set protocols bgp neighbor 172.16.130.2 remote-as 65121
+set protocols bgp neighbor 172.16.130.2 description 'border1 (db)'
+set protocols bgp neighbor 172.16.130.2 bfd profile fabric
+set protocols bgp neighbor 172.16.130.2 address-family ipv4-unicast route-map export TO-TIER
+set protocols bgp neighbor 172.16.130.2 address-family ipv4-unicast default-originate
+set protocols bgp neighbor 172.16.130.3 remote-as 65122
+set protocols bgp neighbor 172.16.130.3 description 'border2 (db)'
+set protocols bgp neighbor 172.16.130.3 bfd profile fabric
+set protocols bgp neighbor 172.16.130.3 address-family ipv4-unicast route-map export TO-TIER
+set protocols bgp neighbor 172.16.130.3 address-family ipv4-unicast default-originate
+set interfaces bonding bond0 vif 199 address 172.16.199.11/28
+set interfaces bonding bond0 vif 199 description 'transit outside'
+set protocols bgp neighbor 172.16.199.2 remote-as 65121
+set protocols bgp neighbor 172.16.199.2 description 'border1 (outside)'
+set protocols bgp neighbor 172.16.199.2 bfd profile fabric
+set protocols bgp neighbor 172.16.199.2 address-family ipv4-unicast route-map export TO-OUTSIDE
+set protocols bgp neighbor 172.16.199.3 remote-as 65122
+set protocols bgp neighbor 172.16.199.3 description 'border2 (outside)'
+set protocols bgp neighbor 172.16.199.3 bfd profile fabric
+set protocols bgp neighbor 172.16.199.3 address-family ipv4-unicast route-map export TO-OUTSIDE

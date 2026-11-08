@@ -1,0 +1,5 @@
+<network>
+  <name>e3t-oob</name>
+  <bridge name='virbr-e3toob' stp='off' delay='0'/>
+  <ip address='10.18.0.1' netmask='255.255.255.0'/>
+</network>

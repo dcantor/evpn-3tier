@@ -1,0 +1,176 @@
+# leaf2 — leaf in rack1 (evpn-3tier); rendered by tools/render.py from lab.conf
+set system host-name leaf2
+set interfaces ethernet eth0 address 10.18.0.22/24
+set interfaces ethernet eth0 description 'OOB management'
+set protocols static route 10.0.0.0/8 next-hop 10.18.0.1
+set service ssh port 22
+set system ip multipath layer4-hashing
+set system ipv6 multipath layer4-hashing
+set protocols bfd profile fabric interval transmit 300
+set protocols bfd profile fabric interval receive 300
+set protocols bfd profile fabric interval multiplier 5
+set interfaces dummy dum0 address 10.61.0.12/32
+set interfaces dummy dum0 description 'loopback / router-id'
+set interfaces ethernet eth1 description 'fabric: spine1 eth2'
+set interfaces ethernet eth1 mtu 9000
+set interfaces ethernet eth2 description 'fabric: spine2 eth2'
+set interfaces ethernet eth2 mtu 9000
+set interfaces ethernet eth3 description 'access: web1 eth2'
+set interfaces ethernet eth4 description 'access: app1 eth2'
+set interfaces ethernet eth5 description 'access: db1 eth2'
+set protocols bgp system-as 65102
+set protocols bgp parameters router-id 10.61.0.12
+set protocols bgp address-family ipv4-unicast network 10.61.0.12/32
+set protocols bgp address-family ipv4-unicast maximum-paths ebgp 4
+set protocols bgp parameters bestpath as-path multipath-relax
+set protocols bgp parameters log-neighbor-changes
+set protocols bgp neighbor eth1 interface remote-as external
+set protocols bgp neighbor eth1 description 'spine1'
+set protocols bgp neighbor eth1 bfd profile fabric
+set protocols bgp neighbor eth1 address-family ipv4-unicast
+set protocols bgp neighbor eth1 address-family l2vpn-evpn
+set protocols bgp neighbor eth2 interface remote-as external
+set protocols bgp neighbor eth2 description 'spine2'
+set protocols bgp neighbor eth2 bfd profile fabric
+set protocols bgp neighbor eth2 address-family ipv4-unicast
+set protocols bgp neighbor eth2 address-family l2vpn-evpn
+set interfaces vxlan vxlan0 source-address 10.61.0.12
+set interfaces vxlan vxlan0 port 4789
+set interfaces vxlan vxlan0 parameters external
+set interfaces vxlan vxlan0 parameters nolearning
+set interfaces vxlan vxlan0 parameters neighbor-suppress
+set interfaces vxlan vxlan0 mtu 9000
+set interfaces bridge br0 enable-vlan
+set interfaces bridge br0 description 'VLAN-aware bridge: VLAN <-> VNI'
+set interfaces bridge br0 mac 52:54:00:d0:04:fe
+set interfaces vxlan vxlan0 mac 52:54:00:d0:04:fd
+set protocols bgp address-family l2vpn-evpn advertise-all-vni
+set vrf name web table 1010
+set vrf name web vni 50010
+set vrf name web description 'VRF web (L3VNI 50010)'
+set interfaces vxlan vxlan0 vlan-to-vni 4010 vni 50010
+set interfaces bridge br0 member interface vxlan0 allowed-vlan 4010
+set interfaces bridge br0 vif 4010 vrf web
+set interfaces bridge br0 vif 4010 description 'L3VNI 50010 (web)'
+set vrf name web protocols bgp system-as 65102
+set vrf name web protocols bgp address-family ipv4-unicast redistribute connected
+set vrf name web protocols bgp address-family l2vpn-evpn advertise ipv4 unicast
+set vrf name web protocols bgp address-family l2vpn-evpn route-target both 65500:50010
+set vrf name web protocols bgp address-family ipv4-unicast maximum-paths ebgp 32
+set vrf name web protocols bgp parameters bestpath as-path multipath-relax
+set vrf name web protocols bgp parameters log-neighbor-changes
+set interfaces dummy dum10 address 10.255.10.12/32
+set interfaces dummy dum10 vrf web
+set interfaces dummy dum10 description 'probe address in web'
+set vrf name app table 1020
+set vrf name app vni 50020
+set vrf name app description 'VRF app (L3VNI 50020)'
+set interfaces vxlan vxlan0 vlan-to-vni 4020 vni 50020
+set interfaces bridge br0 member interface vxlan0 allowed-vlan 4020
+set interfaces bridge br0 vif 4020 vrf app
+set interfaces bridge br0 vif 4020 description 'L3VNI 50020 (app)'
+set vrf name app protocols bgp system-as 65102
+set vrf name app protocols bgp address-family ipv4-unicast redistribute connected
+set vrf name app protocols bgp address-family l2vpn-evpn advertise ipv4 unicast
+set vrf name app protocols bgp address-family l2vpn-evpn route-target both 65500:50020
+set vrf name app protocols bgp address-family ipv4-unicast maximum-paths ebgp 32
+set vrf name app protocols bgp parameters bestpath as-path multipath-relax
+set vrf name app protocols bgp parameters log-neighbor-changes
+set interfaces dummy dum11 address 10.255.20.12/32
+set interfaces dummy dum11 vrf app
+set interfaces dummy dum11 description 'probe address in app'
+set vrf name db table 1030
+set vrf name db vni 50030
+set vrf name db description 'VRF db (L3VNI 50030)'
+set interfaces vxlan vxlan0 vlan-to-vni 4030 vni 50030
+set interfaces bridge br0 member interface vxlan0 allowed-vlan 4030
+set interfaces bridge br0 vif 4030 vrf db
+set interfaces bridge br0 vif 4030 description 'L3VNI 50030 (db)'
+set vrf name db protocols bgp system-as 65102
+set vrf name db protocols bgp address-family ipv4-unicast redistribute connected
+set vrf name db protocols bgp address-family l2vpn-evpn advertise ipv4 unicast
+set vrf name db protocols bgp address-family l2vpn-evpn route-target both 65500:50030
+set vrf name db protocols bgp address-family ipv4-unicast maximum-paths ebgp 32
+set vrf name db protocols bgp parameters bestpath as-path multipath-relax
+set vrf name db protocols bgp parameters log-neighbor-changes
+set interfaces dummy dum12 address 10.255.30.12/32
+set interfaces dummy dum12 vrf db
+set interfaces dummy dum12 description 'probe address in db'
+set protocols bgp address-family l2vpn-evpn advertise-svi-ip
+set interfaces vxlan vxlan0 vlan-to-vni 10 vni 10010
+set interfaces bridge br0 member interface vxlan0 allowed-vlan 10
+set interfaces bridge br0 vif 10 address 172.16.10.242/24
+set interfaces bridge br0 vif 10 mac 52:54:00:d0:04:fe
+set interfaces bridge br0 vif 10 vrf web
+set interfaces bridge br0 vif 10 ip enable-arp-ignore
+set interfaces bridge br0 vif 10 ip enable-arp-announce
+set interfaces bridge br0 vif 10 description 'VLAN 10 / L2VNI 10010 (web)'
+set interfaces pseudo-ethernet peth10 source-interface br0.10
+set interfaces pseudo-ethernet peth10 address 172.16.10.1/32
+set interfaces pseudo-ethernet peth10 vrf web
+set interfaces pseudo-ethernet peth10 ip enable-arp-ignore
+set interfaces pseudo-ethernet peth10 ip disable-arp-filter
+set interfaces pseudo-ethernet peth10 description 'VLAN 10 anycast gateway 172.16.10.1/24 (00:00:5e:00:01:01, set by tools/vyos_files.py)'
+set protocols bgp address-family l2vpn-evpn vni 10010 route-target both 65500:10010
+set interfaces vxlan vxlan0 vlan-to-vni 20 vni 10020
+set interfaces bridge br0 member interface vxlan0 allowed-vlan 20
+set interfaces bridge br0 vif 20 address 172.16.20.242/24
+set interfaces bridge br0 vif 20 mac 52:54:00:d0:04:fe
+set interfaces bridge br0 vif 20 vrf app
+set interfaces bridge br0 vif 20 ip enable-arp-ignore
+set interfaces bridge br0 vif 20 ip enable-arp-announce
+set interfaces bridge br0 vif 20 description 'VLAN 20 / L2VNI 10020 (app)'
+set interfaces pseudo-ethernet peth20 source-interface br0.20
+set interfaces pseudo-ethernet peth20 address 172.16.20.1/32
+set interfaces pseudo-ethernet peth20 vrf app
+set interfaces pseudo-ethernet peth20 ip enable-arp-ignore
+set interfaces pseudo-ethernet peth20 ip disable-arp-filter
+set interfaces pseudo-ethernet peth20 description 'VLAN 20 anycast gateway 172.16.20.1/24 (00:00:5e:00:01:01, set by tools/vyos_files.py)'
+set protocols bgp address-family l2vpn-evpn vni 10020 route-target both 65500:10020
+set interfaces vxlan vxlan0 vlan-to-vni 30 vni 10030
+set interfaces bridge br0 member interface vxlan0 allowed-vlan 30
+set interfaces bridge br0 vif 30 address 172.16.30.242/24
+set interfaces bridge br0 vif 30 mac 52:54:00:d0:04:fe
+set interfaces bridge br0 vif 30 vrf db
+set interfaces bridge br0 vif 30 ip enable-arp-ignore
+set interfaces bridge br0 vif 30 ip enable-arp-announce
+set interfaces bridge br0 vif 30 description 'VLAN 30 / L2VNI 10030 (db)'
+set interfaces pseudo-ethernet peth30 source-interface br0.30
+set interfaces pseudo-ethernet peth30 address 172.16.30.1/32
+set interfaces pseudo-ethernet peth30 vrf db
+set interfaces pseudo-ethernet peth30 ip enable-arp-ignore
+set interfaces pseudo-ethernet peth30 ip disable-arp-filter
+set interfaces pseudo-ethernet peth30 description 'VLAN 30 anycast gateway 172.16.30.1/24 (00:00:5e:00:01:01, set by tools/vyos_files.py)'
+set protocols bgp address-family l2vpn-evpn vni 10030 route-target both 65500:10030
+set interfaces ethernet eth1 evpn uplink
+set interfaces ethernet eth2 evpn uplink
+set interfaces bonding bond1 mode 802.3ad
+set interfaces bonding bond1 lacp-rate fast
+set interfaces bonding bond1 min-links 1
+set interfaces bonding bond1 member interface eth3
+set interfaces bonding bond1 system-mac 02:00:00:00:e3:01
+set interfaces bonding bond1 evpn es-id 1
+set interfaces bonding bond1 evpn es-sys-mac 02:00:00:00:e3:01
+set interfaces bonding bond1 evpn es-df-pref 100
+set interfaces bonding bond1 description 'ES 1: web1 (with leaf1)'
+set interfaces bridge br0 member interface bond1 allowed-vlan 10
+set interfaces bonding bond2 mode 802.3ad
+set interfaces bonding bond2 lacp-rate fast
+set interfaces bonding bond2 min-links 1
+set interfaces bonding bond2 member interface eth4
+set interfaces bonding bond2 system-mac 02:00:00:00:e3:02
+set interfaces bonding bond2 evpn es-id 2
+set interfaces bonding bond2 evpn es-sys-mac 02:00:00:00:e3:02
+set interfaces bonding bond2 evpn es-df-pref 100
+set interfaces bonding bond2 description 'ES 2: app1 (with leaf1)'
+set interfaces bridge br0 member interface bond2 allowed-vlan 20
+set interfaces bonding bond3 mode 802.3ad
+set interfaces bonding bond3 lacp-rate fast
+set interfaces bonding bond3 min-links 1
+set interfaces bonding bond3 member interface eth5
+set interfaces bonding bond3 system-mac 02:00:00:00:e3:03
+set interfaces bonding bond3 evpn es-id 3
+set interfaces bonding bond3 evpn es-sys-mac 02:00:00:00:e3:03
+set interfaces bonding bond3 evpn es-df-pref 100
+set interfaces bonding bond3 description 'ES 3: db1 (with leaf1)'
+set interfaces bridge br0 member interface bond3 allowed-vlan 30

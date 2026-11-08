@@ -1,0 +1,17 @@
+nodes/*/disk.qcow2
+nodes/*/seed.iso*
+nodes/*/console.log
+nodes/*/bootstrap.log
+nodes/*/domain.xml
+nodes/*/meta-data
+nodes/*/user-data
+nodes/*/network-config
+tests/.venv/
+results/
+__pycache__/
+*.pyc
+webapp/.venv/
+webapp/runs/
+images/*.qcow2
+images/.builder/
+images/build.log
