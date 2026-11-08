@@ -16,7 +16,7 @@ N = {n["name"]: n for n in inv["nodes"]}
 
 
 def ssh(node, cmd):
-    n = N[node]; user, pw = ("lab", "lab") if n["role"] in ("lb", "web", "app", "db") else ("vyos", "vyos")
+    n = N[node]; user, pw = ("lab", "lab") if n["role"] in ("lb", "web", "app", "db", "ipam") else ("vyos", "vyos")
     c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     c.connect(n["mgmt_ip"], username=user, password=pw, look_for_keys=False, allow_agent=False, timeout=20)
     try:

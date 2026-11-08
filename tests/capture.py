@@ -19,6 +19,7 @@ CMDS = {
     "wan":    ["show bgp summary", "show ip route"],
     "lb":     ["ip -br a", "doas cat /proc/net/bonding/bond0"], "web": ["ip -br a"], "app": ["ip -br a"],
     "db":     ["ip -br a", "doas su postgres -s /bin/sh -c 'psql -qtAX -c \"select pg_is_in_recovery()\"'"],
+    "ipam":   ["ip -br a", "doas docker ps --format '{{.Names}} {{.Image}} {{.Status}}'"],
 }
 
 

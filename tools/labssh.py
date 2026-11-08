@@ -4,7 +4,7 @@ from pathlib import Path
 import paramiko
 
 LAB = Path(__file__).resolve().parents[1]
-LINUX_ROLES = ("lb", "web", "app", "db")
+LINUX_ROLES = ("lb", "web", "app", "db", "ipam")
 
 
 def inventory():

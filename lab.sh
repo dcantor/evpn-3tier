@@ -23,7 +23,8 @@ ours() {   # domain names are host-wide: refuse to touch a same-named VM that be
 state() { V domstate "$(dom "$1")" 2>/dev/null || echo undefined; }
 running() { [[ "$(state "$1")" == "running" ]]; }
 nodes_or_all() { local n; if [[ $# -gt 0 ]]; then for n in "$@"; do known "$n"; done; echo "$*"; else echo "${ALL_NODES[*]}"; fi; }
-is_linux() { case "${ROLE[$1]}" in lb|web|app|db) return 0;; esac; return 1; }
+is_linux() { case "${ROLE[$1]}" in lb|web|app|db|ipam) return 0;; esac; return 1; }
+is_tier() { case "${ROLE[$1]}" in lb|web|app|db) return 0;; esac; return 1; }   # on the fabric (a bond, a tier VLAN)
 is_vyos() { ! is_linux "$1"; }
 vyos_nodes_or_all() { local n out=(); for n in $(nodes_or_all "$@"); do is_vyos "$n" && out+=("$n"); done; echo "${out[*]:-}"; }
 linux_nodes_or_all() { local n out=(); for n in $(nodes_or_all "$@"); do is_linux "$n" && out+=("$n"); done; echo "${out[*]:-}"; }
@@ -185,9 +186,10 @@ U
 }
 build() {
   local n="$1" d base; d="$(node_dir "$n")"; mkdir -p "$d"
-  if is_linux "$n"; then base="$LINUX_IMAGE"
+  if [[ "${ROLE[$n]}" == ipam ]]; then base="$IPAM_IMAGE"
+  elif is_linux "$n"; then base="$LINUX_IMAGE"
   else base="$VYOS_IMAGE"; [[ -f "$d/vyos_config.txt" ]] || die "$d/vyos_config.txt missing (run: lab.sh gen)"; fi
-  [[ -f "$base" ]] || die "base image not found: $base$(is_linux "$n" && echo ' (run: tools/build_image.sh)')"
+  [[ -f "$base" ]] || die "base image not found: $base$(is_linux "$n" && echo ' (run: tools/build_image.sh or tools/build_ipam_image.sh)')"
   [[ -f "$d/disk.qcow2" ]] || { echo "[$n] creating overlay disk on $(basename "$base")"; qemu-img create -q -f qcow2 -b "$base" -F qcow2 "$d/disk.qcow2"; }
   is_linux "$n" && linux_seed "$n"
   domain_xml "$n" > "$d/domain.xml"
@@ -253,7 +255,7 @@ cmd_configure() {  # (re)apply nodes/<n>/vyos_config.txt over SSH — idempotent
   [[ -z "$(vyos_nodes_or_all "$@")" ]] || "$PY" "$LAB_DIR/tools/vyos_files.py" check >/dev/null || die "tools/vyos_files.py is broken: nothing pushed"
   local n lx=() vy=(); for n in $(vyos_nodes_or_all "$@"); do "$PY" "$LAB_DIR/tools/vyos_push.py" "${MGMT_IP[$n]}" "$(node_dir "$n")/vyos_config.txt" | sed "s/^/[$n] /"; vy+=("$n"); done
   [[ ${#vy[@]} -eq 0 ]] || "$PY" "$LAB_DIR/tools/vyos_files.py" push "${vy[@]}"
-  for n in $(linux_nodes_or_all "$@"); do lx+=("$n"); done
+  for n in $(linux_nodes_or_all "$@"); do is_tier "$n" && lx+=("$n"); done
   [[ ${#lx[@]} -eq 0 ]] || "$PY" "$LAB_DIR/tools/server_net.py" push "${lx[@]}"
 }
 cmd_wait() {       # block until SSH answers
@@ -317,6 +319,7 @@ cmd_webapp() {     # the portal (webapp/, FastAPI) on :8119; as a service: evpn-
 cmd_chaos() { need_python; "$PY" "$LAB_DIR/tools/chaos.py" "$@"; }   # a component fails under load (tools/chaos.py)
 cmd_db() { need_python; "$PY" "$LAB_DIR/tools/dbctl.py" "$@"; }       # status | promote | reseed | switchover
 cmd_test() { need_python; exec "$LAB_DIR/tests/run.sh" "$@"; }       # the Robot Framework suites (results/<timestamp>/)
+cmd_ipam() { need_python; "$PY" "$LAB_DIR/tools/phpipam_load.py" "$@"; }   # load the lab's subnets and addresses into phpIPAM
 cmd_services() { need_python; "$PY" "$LAB_DIR/tools/services.py" "$@"; }   # the application: db, app, web, lb (tools/services.py)
 cmd_fw-failover() { need_python; "$PY" "$LAB_DIR/tools/fw_failover.py" "$@"; }   # power fw1 off under a live connection, then back
 cmd_check-wiring() { need_python; "$PY" "$LAB_DIR/tools/check_wiring.py"; }   # every link reaches the peer lab.conf says
@@ -339,6 +342,7 @@ usage: $(basename "$0") <command> [node...]
   check-wiring       prove every link reaches the peer port lab.conf names (by MAC; bond legs by LACP partner)
   verify [--quick]   fabric, firewall sessions and preference, data plane, the firewall policy matrix (--quick: no matrix)
   services [--reseed] [node..]  deploy the application: PostgreSQL primary + replica, app, nginx, HAProxy + keepalived
+  ipam [--check]     load every subnet, VLAN, VRF and address of the lab into phpIPAM (node ipam, http://10.18.0.5/)
   webapp             the portal on :8119 (state, runs, /shop/, /metrics, /api/sd, /docs); as a service: evpn-3tier-webapp
   chaos <scenario>   under load from wan: lb | web | app | db | leaf | border | fw | all — fail it, restore, count losses
   db [status|promote N|reseed N FROM|switchover N]   PostgreSQL roles
@@ -352,6 +356,6 @@ U
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services|chaos|db|test|webapp) "cmd_$cmd" "$@" ;;
+  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services|chaos|db|test|webapp|ipam) "cmd_$cmd" "$@" ;;
   *) usage; exit 1 ;;
 esac

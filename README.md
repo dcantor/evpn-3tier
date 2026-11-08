@@ -88,6 +88,23 @@ report against lab.conf (VyOS repos) -> check mode with diff -> apply -> `lab.sh
 
 `lab.sh configure` / `services` still work (lab.conf); once Nautobot is edited they would push lab.conf's values back.
 
+## External IPAM: phpIPAM (node `ipam`)
+
+Since 0.7.0 the lab has an external IPAM: **phpIPAM 1.8.3** on the 20th VM, `ipam` (Alpine + Docker: phpipam-www and
+MariaDB 11.8, baked into `images/e3t-ipam.qcow2` by `tools/build_ipam_image.sh`; OOB only, 10.18.0.5, 1 GiB).
+nginx in front: **https://10.18.0.5/** (the API: phpIPAM's app-code auth is HTTPS only) and http://10.18.0.5/ (the UI);
+phpIPAM itself listens on 127.0.0.1:8080 and trusts nginx's X-Forwarded-Proto.
+
+`./lab.sh ipam` (tools/phpipam_load.py) loads the lab's real addressing from lab.conf — idempotent (`--check`: what
+would change): section `evpn-3tier`; VRFs web / app / db / outside (RD = RT 65500:<L3VNI>); VLAN domain `evpn-3tier`
+(11 VLANs: tier, transit, L3VNI); **20 subnets** nested under 172.16.0.0/16, 172.31.0.0/16 and 10.255.0.0/16, each with
+its VRF and VLAN; **102 addresses** with hostname, description, MAC and gateway flag (every VM's OOB address, loopbacks,
+anycast gateways, the switches' VLAN addresses, servers, the web VIP, transit, wan links, sync + VRRP, probes, clients).
+The first run bootstraps phpIPAM (schema without the demo data, admin password, API app `e3t`, ssl_code); credentials
+are made at random and kept in `~/.config/evpn-3tier/phpipam.env` (mode 600), not in git.
+
+**Nautobot is not synced with it (yet)** — that is a separate, later step; the ipam VM is not in Nautobot either.
+
 ## The portal, the Lab Hub, the NMS
 
 **Portal:** http://192.168.50.231:8119 (sign in at the Lab Hub; user unit `evpn-3tier-webapp`, `./lab.sh webapp`).
@@ -189,6 +206,9 @@ lb1 / web1 lose a few now and then. The Robot suites (tests/suites/01-09) assert
   under `attribute-unchanged next-hop`, so Ansible's vyos_config (line by line) sent it on every run. The renderer emits
   only the deeper line. And two lines set fw eth3's description (the last won on a commit; Ansible saw the other missing).
 - **ansible-core 2.21+ has no paramiko_ssh:** without sshpass on the host, the pipeline pins ansible-core 2.20.
+- **phpIPAM's API:** `ssl_token` means *user* tokens (log in first); a static app token is `ssl_code`, and HTTPS only.
+  A write that answers 404 is a failure (vlanId 0: "Vlan does not exist"); address descriptions are varchar(64); text is
+  stored HTML-escaped and anything tag-like ("<->") is stripped. Docker on Alpine needs the `cgroups` service first.
 - **OpenRC can remember a crashed PostgreSQL:** `rc-service postgresql start` then says "already started" and does
   nothing; re-seeding a replica (tools/dbctl.py) zaps the state and stops any leftover postmaster first. And
   `pg_basebackup -R` appends a `primary_conninfo` to the copied postgresql.auto.conf, which already holds the source's:

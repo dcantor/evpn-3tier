@@ -143,6 +143,8 @@ def ip_on(addr, iface, desc, role=None, t=None):
     return o
 
 linux_roles = ("lb", "web", "app", "db")
+inv["nodes"] = [n for n in inv["nodes"] if n["role"] != "ipam"]   # the external IPAM: not in Nautobot (syncing is the user's, later)
+N = {n["name"]: n for n in inv["nodes"]}
 for n in inv["nodes"]:
     is_linux = n["role"] in linux_roles
     local = {"idx": n["idx"], "console": n["console"], **({"asn": n["asn"]} if n.get("asn") else {}),

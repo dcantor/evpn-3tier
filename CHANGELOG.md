@@ -2,6 +2,19 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-11-08
+
+### Added
+- An external IPAM: node `ipam` (20th VM, 10.18.0.5, Alpine + Docker) running phpIPAM 1.8.3 + MariaDB 11.8 behind nginx
+  (HTTPS for the API), built by tools/build_ipam_image.sh. `./lab.sh ipam` (tools/phpipam_load.py) loads every subnet,
+  VLAN, VRF and address reservation of the lab from lab.conf, idempotently: 4 VRFs, 11 VLANs, 20 subnets, 102
+  addresses. Not synced with Nautobot (later).
+- managed deletions in the VyOS pipelines (Gitea evpn-3tier-switches / -firewalls): what the templates no longer render is
+  deleted from the device, protected paths excepted, capped at 25 per node.
+
+### Fixed
+- verify retries `show vrrp` and the portal samples it every 30 s (two readers of keepalived's dump collided).
+
 ## [0.6.1] - 2026-11-08
 
 ### Changed
