@@ -12,7 +12,7 @@
             allows it — temporary listeners on the targets, python3 clients on the sources (wan for "outside")
 
   verify.py [--quick]     --quick: skip the policy matrix"""
-import ipaddress, sys
+import ipaddress, sys, time
 from concurrent.futures import ThreadPoolExecutor
 from labssh import inventory, run, vtysh_json
 
@@ -69,7 +69,12 @@ def firewalls():
             nhs = [h.get("ip") for p in r.get("0.0.0.0/0", []) if p.get("selected") for h in p.get("nexthops", [])]
             want = t["fws"][fw1["name"]].split("/")[0]
             out.append((f"{b['name']} VRF {t['vrf']}: default route via fw1 ({want})", nhs == [want], f"next hops {nhs}"))
-    rc, o = run(fw1["name"], "/opt/vyatta/bin/vyatta-op-cmd-wrapper show vrrp", inv=inv)
+    # `show vrrp` makes keepalived dump its state to a file and reads it back: two readers at once (the portal samples it
+    # too) and one gets "VRRP data is not available" — ask up to three times
+    for _ in range(3):
+        rc, o = run(fw1["name"], "/opt/vyatta/bin/vyatta-op-cmd-wrapper show vrrp", inv=inv)
+        if "MASTER" in o or "BACKUP" in o: break
+        time.sleep(2)
     out.append(("fw1 is the conntrack-sync VRRP master", "MASTER" in o, o.strip()[-200:]))
     return out
 

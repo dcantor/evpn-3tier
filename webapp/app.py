@@ -82,9 +82,18 @@ def s_switch(n):
     return out
 
 
+_vrrp = {}                                                            # node -> (when, state): `show vrrp` at most every 30 s
+
+
 def s_fw(n):
     up, tot = bgp_sessions(n["name"])
-    _, vr = ssh(n["name"], f"{OP} show vrrp", inv=INV)
+    # `show vrrp` dumps keepalived's state to a file and reads it back: concurrent readers (verify, the tests) can get
+    # "VRRP data is not available" — so the sampler asks only every 30 s, and keeps the last good answer
+    t, vr = _vrrp.get(n["name"], (0, ""))
+    if time.time() - t > 30:
+        _, new = ssh(n["name"], f"{OP} show vrrp", inv=INV)
+        if "MASTER" in new or "BACKUP" in new or not vr: vr = new
+        _vrrp[n["name"]] = (time.time(), vr)
     _, ct = ssh(n["name"], "sudo /usr/sbin/conntrack -C", inv=INV)
     return {"bgp_up": up, "bgp_total": tot, "vrrp": "MASTER" if "MASTER" in vr else ("BACKUP" if "BACKUP" in vr else "?"),
             "conntrack": int(ct.strip()) if ct.strip().isdigit() else None}
