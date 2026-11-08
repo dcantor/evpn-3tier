@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order Desk</title>
+<style>
+  :root { --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --card: #fff; --line: #e3e3de; --accent: #2f6f5e; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ededea; --muted: #9a9a94; --card: #1f1f1d; --line: #33332f; --accent: #6fc2a8; --bad: #f2b8b5; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } p.sub { color: var(--muted); margin: 0 0 20px; }
+  .chain { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 20px; }
+  .hop { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .hop b { display: block; font-size: 12px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+  .hop span { font: 600 16px ui-monospace, monospace; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  input, button { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+  input[name=item] { flex: 1 1 200px; } input[name=qty] { width: 80px; }
+  button { background: var(--accent); color: var(--bg); border-color: var(--accent); cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  th { color: var(--muted); font-weight: 500; } td.m { font-family: ui-monospace, monospace; }
+  .wrap { overflow-x: auto; } .err { color: var(--bad); min-height: 1.4em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Order Desk</h1>
+  <p class="sub">A three-tier demo on an EVPN fabric: HAProxy → nginx → app → PostgreSQL, each tier in its own VRF, a firewall between them.</p>
+  <div class="chain" id="chain"></div>
+  <form id="f"><input name="item" placeholder="item" required maxlength="80"><input name="qty" type="number" min="1" value="1"><button>Place order</button></form>
+  <div class="err" id="err"></div>
+  <div class="wrap"><table><thead><tr><th>#</th><th>item</th><th>qty</th><th>web</th><th>app</th><th>db</th><th>when</th></tr></thead><tbody id="rows"></tbody></table></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+async function info() {
+  try {
+    const r = await fetch("/api/info", {cache: "no-store"}); const j = await r.json();
+    const hops = [["client", j.client], ["load balancer", j.lb], ["web", j.web], ["app", j.app], ["database", j.db ? `${j.db} (${j.db_role})` : "—"]];
+    $("chain").innerHTML = hops.map(([k, v]) => `<div class="hop"><b>${k}</b><span>${esc(v || "—")}</span></div>`).join("");
+    $("err").textContent = j.error || "";
+  } catch (e) { $("err").textContent = "no answer: " + e; }
+}
+async function orders() {
+  try {
+    const rows = await (await fetch("/api/orders", {cache: "no-store"})).json();
+    if (!Array.isArray(rows)) return;
+    $("rows").innerHTML = rows.map((o) => `<tr><td>${o.id}</td><td>${esc(o.item)}</td><td>${o.qty}</td><td class="m">${esc(o.web)}</td><td class="m">${esc(o.app)}</td><td class="m">${esc(o.db)}</td><td>${esc(String(o.created).slice(11, 19))}</td></tr>`).join("");
+  } catch (e) {}
+}
+$("f").addEventListener("submit", async (ev) => {
+  ev.preventDefault(); const f = new FormData(ev.target);
+  const r = await fetch("/api/orders", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({item: f.get("item"), qty: Number(f.get("qty"))})});
+  const j = await r.json(); $("err").textContent = r.ok ? "" : (j.error || r.status); if (r.ok) ev.target.reset(); orders(); info();
+});
+info(); orders(); setInterval(info, 2000); setInterval(orders, 5000);
+</script>
+</body>
+</html>

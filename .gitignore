@@ -15,3 +15,4 @@ webapp/runs/
 images/*.qcow2
 images/.builder/
 images/build.log
+nodes/.lb-cert/

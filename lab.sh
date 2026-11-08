@@ -307,6 +307,7 @@ cmd_ssh() {
 cmd_show() { local n="${1:?node}"; shift; known "$n"; is_vyos "$n" || die "$n is not a VyOS node"; need_python; "$PY" "$LAB_DIR/tools/vyos_cmd.py" "${MGMT_IP[$n]}" "$*"; }
 cmd_log() { tail -n "${2:-50}" -f "$(node_dir "${1:?node}")/console.log"; }
 cmd_verify() { need_python; "$PY" "$LAB_DIR/tools/verify.py" "$@"; }   # control plane + data plane, end to end
+cmd_services() { need_python; "$PY" "$LAB_DIR/tools/services.py" "$@"; }   # the application: db, app, web, lb (tools/services.py)
 cmd_fw-failover() { need_python; "$PY" "$LAB_DIR/tools/fw_failover.py" "$@"; }   # power fw1 off under a live connection, then back
 cmd_check-wiring() { need_python; "$PY" "$LAB_DIR/tools/check_wiring.py"; }   # every link reaches the peer lab.conf says
 
@@ -327,6 +328,7 @@ usage: $(basename "$0") <command> [node...]
   log <node> [n]     follow a node's console log
   check-wiring       prove every link reaches the peer port lab.conf names (by MAC; bond legs by LACP partner)
   verify [--quick]   fabric, firewall sessions and preference, data plane, the firewall policy matrix (--quick: no matrix)
+  services [--reseed] [node..]  deploy the application: PostgreSQL primary + replica, app, nginx, HAProxy + keepalived
   fw-failover        one TCP connection web1 -> app1 while fw1 is powered off and back: gaps, survival
   rebuild [node..]   re-generate domain XML / Linux seeds (keeps disks)
   clean [node..]     stop, undefine and delete overlay disks
@@ -336,6 +338,6 @@ U
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover) "cmd_$cmd" "$@" ;;
+  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services) "cmd_$cmd" "$@" ;;
   *) usage; exit 1 ;;
 esac

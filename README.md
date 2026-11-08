@@ -37,7 +37,8 @@ tools/build_image.sh    # once: images/e3t-alpine.qcow2
 ./lab.sh bootstrap      # first boot only: day-0 config over the serial consoles (~5 min, parallel)
 ./lab.sh configure      # re-apply the VyOS configs; Linux VMs: bond, VLAN, default route
 ./lab.sh check-wiring   # every link reaches the peer port lab.conf names
-./lab.sh verify         # 57 checks: fabric, firewall sessions + fw1 preferred, data plane, the policy matrix
+./lab.sh services       # the application: PostgreSQL primary + replica, app, nginx, HAProxy + keepalived
+./lab.sh verify         # 65 checks: fabric, firewalls, data plane, the application end to end, the policy matrix
 ./lab.sh fw-failover    # power fw1 off under a live web1 -> app1 connection, and back (~4 min)
 ./lab.sh status
 ./lab.sh down
@@ -51,10 +52,35 @@ shell command on any node.
 0. Image, topology, lab.sh — **done (0.1.0)**
 1. Fabric, VRFs, ESI-LAG — **done (0.1.0)**
 2. Firewall policy (zones, per-tier rules), conntrack-sync, fw failover — **done (0.2.0)**
-3. HAProxy + keepalived (web VIP), nginx, the app tier, PostgreSQL primary + replica
+3. HAProxy + keepalived (web VIP), nginx, the app tier, PostgreSQL primary + replica — **done (0.3.0)**
 4. Failure tests and the Robot suite
 5. Portal (8119), Lab Hub, NMS
 6. Optional: L4 load-balancing experiments
+
+## The application
+
+**Order Desk** (app/): a page and a small order API. Every answer says which load balancer, web server, app server and
+database served it, so a failover shows on the page.
+
+```
+client ─443─► VIP 172.16.10.10 (keepalived: lb1, else lb2) ─► HAProxy ─round robin, /health every 1 s─► nginx web1 / web2
+   nginx ─/api/, across the firewall (8080)─► app1 / app2   (nginx tries the other on error, rests a failed one 10 s)
+   app   ─across the firewall (5432)─► host=db1,db2 target_session_attrs=read-write ─► the PostgreSQL primary
+   db1 primary ─streaming replication─► db2 hot standby
+```
+
+- **lb1 / lb2:** HAProxy 3.2 (:443 TLS with a self-signed lab certificate in nodes/.lb-cert/, :80 redirects; stats on
+  the OOB address :8404 — http://10.18.0.51:8404/ from the host). keepalived 2.3 holds the VIP (VRRP unicast, lb1
+  priority 150) while HAProxy runs.
+- **web1 / web2:** nginx 1.28: the page, `/health`, `/api/` to both app servers.
+- **app1 / app2:** app/app.py (OpenRC service `e3t-app`), psycopg 3; a fresh database connection per request.
+- **db1 / db2:** PostgreSQL 17, database `shop`; `app` may connect only from the app VLAN, `replicator` only from the
+  db VLAN. No VIP, no load balancer: the app's connection string finds the primary.
+
+**See it in a browser.** The host has no route into the tier VRFs (only the OOB network). Tunnel through wan, whose
+traffic enters as "outside" like any client: `ssh -L 8443:172.16.10.10:443 vyos@10.18.0.45` (password vyos), then
+https://localhost:8443/ (accept the lab certificate). From the command line, on wan:
+`curl -sk --interface 198.51.100.1 https://172.16.10.10/api/info`.
 
 ## The firewalls
 
@@ -74,6 +100,9 @@ whose state changes, so a long-idle connection may be missing on it until then (
 - **No /32s to the firewalls.** advertise-svi-ip puts the other border's transit address into the VRF as a /32; exported
   to the firewalls it routed their BFD / BGP to that border through this one (TTL - 1, the sessions died). See TO-FW.
 - **VLAN IDs stop at 4094.** VyOS dropped VLAN 4099 lines without an error.
+- **BusyBox `pgrep -x haproxy` never matches** (keepalived's check failed, both load balancers sat in FAULT): `pidof`.
+- **nginx -t needs /run/nginx,** which only the init script creates; **`$$` in SQL** does not survive two shells — the
+  roles are created from a file.
 - **`pkill -f` from a script started over SSH:** a pattern that also matches the shell's own command line (the program
   started in the same command) kills the session. Kill in a separate SSH call, with `[e]3t-...` patterns.
 - **libvirt `<serial type='file'>` logs are root-only;** the image builder uses a pty with `<log append='on'>`.

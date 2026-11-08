@@ -6,6 +6,8 @@
   firewall  every border <-> firewall session up in every VRF; fw1 is the preferred next hop (the default route in
             each tier VRF on the borders points at fw1); fw1 is the conntrack-sync VRRP master
   data      each Linux VM reaches its anycast gateway and the other VMs of its VRF
+  app       the web VIP on the first load balancer only; from wan's test clients, requests through the VIP reach every
+            web and app server and the database primary; an order written from outside reaches every replica
   policy    for each (source tier, destination, port): a TCP connection succeeds exactly when FW_POLICY (or one VRF)
             allows it — temporary listeners on the targets, python3 clients on the sources (wan for "outside")
 
@@ -88,6 +90,40 @@ def data(n):
     return out
 
 
+# ---- the application -------------------------------------------------------------------------------------------------
+import json, time
+
+
+def app():
+    out = []; vip = inv["web_vip"]; clients = str(ipaddress.ip_network(inv["wan"]["clients"]).network_address + 1)
+    lbs = sorted(by_role("lb"), key=lambda n: n["idx"])
+    has = {l["name"]: f" {vip}/" in run(l["name"], f"ip -br a show bond0.{l['net']['vlan']}", inv=inv)[1] for l in lbs}
+    out.append((f"web VIP {vip} on {lbs[0]['name']} only", has[lbs[0]["name"]] and not any(has[l["name"]] for l in lbs[1:]), f"held: {has}"))
+    curl = f"curl -sk -m5 --interface {clients}"
+    _, o = run("wan", "; ".join([f"{curl} https://{vip}/api/info; echo"] * 12), timeout=120, inv=inv)
+    got = [json.loads(l) for l in o.splitlines() if l.startswith("{")]
+    seen = lambda k: sorted({g.get(k) for g in got})
+    webs = sorted(n["name"] for n in by_role("web")); apps = sorted(n["name"] for n in by_role("app"))
+    primary = ip_of(sorted(by_role("db"), key=lambda n: n["idx"])[0])
+    out.append((f"12 requests from {clients} through the VIP: all answered", len(got) == 12, f"{len(got)} answered"))
+    out.append((f"...spread over every web server {webs}", seen("web") == webs, f"saw {seen('web')}"))
+    out.append((f"...and every app server {apps}", seen("app") == apps, f"saw {seen('app')}"))
+    out.append((f"...all on the database primary {primary}", seen("db") == [primary] and seen("db_role") == ["primary"], f"saw {seen('db')} {seen('db_role')}"))
+    out.append((f"...the client address seen by the app is {clients}", seen("client") == [clients], f"saw {seen('client')}"))
+    item = f"verify-{int(time.time())}"
+    _, o = run("wan", f"{curl} -X POST -H 'Content-Type: application/json' -d '{{\"item\":\"{item}\",\"qty\":1}}' https://{vip}/api/orders", inv=inv)
+    out.append(("an order placed from outside is written", f'"{item}"' in o, o[-200:]))
+    time.sleep(1)
+    for d in sorted(by_role("db"), key=lambda n: n["idx"])[1:]:
+        _, o = run(d["name"], f"doas su postgres -s /bin/sh -c \"psql -qtAX -d shop -c \\\"select pg_is_in_recovery(), count(*) from orders where item = '{item}'\\\"\"", inv=inv)
+        out.append((f"...and replicated to {d['name']} (a hot standby)", o.strip() == "t|1", o.strip()[-200:]))
+    return out
+
+
+def ip_of(n):
+    return n["net"]["address"].split("/")[0]
+
+
 # ---- the firewall policy ---------------------------------------------------------------------------------------------
 PORTS = sorted({int(p["port"]) for p in inv.get("fw_policy", []) if p["proto"] == "tcp" and p["port"]} | {9999})
 LISTEN = ("python3 -c \"import socket,threading,time\n"
@@ -121,15 +157,17 @@ def policy():
 
     def one(src_vrf_bind):
         src, vrf, bind = src_vrf_bind
-        tg = [(m, port) for m in hosts for port in PORTS if m["name"] != src]
+        vipt = {"name": "VIP", "net": {"address": inv["web_vip"] + "/24", "vrf": "web"}}
+        tg = [(m, port) for m in hosts + [vipt] for port in PORTS if m["name"] != src]
         py = CONNECT.format(bind=bind, targets=" ".join(f"{m['net']['address'].split('/')[0]}:{p}" for m, p in tg))
         _, o = run(src, py, timeout=180, inv=inv)
         seen = {l.split()[1]: l.split()[0] == "OPEN" for l in o.splitlines() if l.split()[:1] in (["OPEN"], ["CLOSED"])}
         wrong = []
         for m, port in tg:
             ip = m["net"]["address"].split("/")[0]; want = allowed(vrf, m["net"]["vrf"], ip, port)
+            if m["name"] == "VIP": want = want and port in (80, 443)      # HAProxy serves only these on the VIP
             if seen.get(f"{ip}:{port}") != want: wrong.append(f"{m['name']}:{port} {'open' if seen.get(f'{ip}:{port}') else 'closed'}, want {'open' if want else 'closed'}")
-        n_open = sum(allowed(vrf, m["net"]["vrf"], m["net"]["address"].split("/")[0], p) for m, p in tg)
+        n_open = sum(allowed(vrf, m["net"]["vrf"], m["net"]["address"].split("/")[0], p) and (m["name"] != "VIP" or p in (80, 443)) for m, p in tg)
         return (f"policy from {src} ({vrf}): {len(tg)} flows, {n_open} allowed, the rest blocked", not wrong, "; ".join(wrong[:6]))
     with ThreadPoolExecutor(len(sources)) as ex:   # in parallel: each blocked flow costs its 2 s timeout
         return list(ex.map(one, sources))
@@ -145,6 +183,8 @@ def main():
     print("== data plane")
     with ThreadPoolExecutor(8) as ex:
         for res in ex.map(data, linux()): [check(*r) for r in res]
+    print("== application")
+    [check(*r) for r in app()]
     if not quick:
         print("== firewall policy")
         [check(*r) for r in policy()]

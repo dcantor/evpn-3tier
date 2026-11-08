@@ -2,6 +2,17 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-11-08
+
+### Added
+- Phase 3: the application (app/): Order Desk — a page (nginx on web1 / web2) and an order API (app/app.py on app1 /
+  app2, psycopg 3) on PostgreSQL 17 (db1 primary, db2 streaming replica, hot standby). HAProxy 3.2 on lb1 / lb2 in front
+  of the web tier only (TLS, health checks), keepalived holding the web VIP 172.16.10.10. Each answer names the lb, web,
+  app and db that served it.
+- `./lab.sh services [--reseed] [node...]` (tools/services.py) deploys it, idempotently.
+- `verify`: the application from outside (VIP placement, every web and app server used, the primary, the client
+  address, an order written and replicated) and the VIP in the policy matrix — 65 checks.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added
