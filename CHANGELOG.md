@@ -2,6 +2,13 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.1] - 2026-11-08
+
+### Added
+- phpIPAM on the LAN: https://192.168.50.231:8443/ (UI and API), a TLS passthrough (user unit evpn-3tier-ipam, socat)
+  accepting 192.168.50.0/24 only; the certificate also names 192.168.50.231; nginx passes X-Forwarded-Port so phpIPAM's
+  links keep the port. Lab Hub link.
+
 ## [0.7.0] - 2026-11-08
 
 ### Added

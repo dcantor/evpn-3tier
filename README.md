@@ -103,6 +103,12 @@ anycast gateways, the switches' VLAN addresses, servers, the web VIP, transit, w
 The first run bootstraps phpIPAM (schema without the demo data, admin password, API app `e3t`, ssl_code); credentials
 are made at random and kept in `~/.config/evpn-3tier/phpipam.env` (mode 600), not in git.
 
+**From the LAN: https://192.168.50.231:8443/** (UI and API, e.g. `https://192.168.50.231:8443/api/e3t/`) — a TLS
+passthrough on the lab host (user unit `evpn-3tier-ipam`: socat 192.168.50.231:8443 -> 10.18.0.5:443, **clients from
+192.168.50.0/24 only**). TLS is end to end (phpIPAM's API requires HTTPS); phpIPAM's login and API token protect it. The
+certificate (self-signed) names 10.18.0.5 and 192.168.50.231. nginx passes the port the client used
+(X-Forwarded-Port), so phpIPAM's links keep :8443. The Lab Hub's card links it.
+
 **Nautobot is not synced with it (yet)** — that is a separate, later step; the ipam VM is not in Nautobot either.
 
 ## The portal, the Lab Hub, the NMS

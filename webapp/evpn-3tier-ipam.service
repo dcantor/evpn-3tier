@@ -1,0 +1,13 @@
+[Unit]
+Description=evpn-3tier - phpIPAM (node ipam) to the LAN: TLS passthrough 192.168.50.231:8443 -> 10.18.0.5:443, from 192.168.50.0/24 only
+After=network-online.target
+
+[Service]
+# TCP, not HTTP: TLS stays end to end (phpIPAM's API requires HTTPS); phpIPAM's login and API token protect it.
+# range= : socat refuses any client outside the LAN.
+ExecStart=/usr/bin/socat TCP-LISTEN:8443,bind=192.168.50.231,reuseaddr,fork,range=192.168.50.0/24 TCP:10.18.0.5:443,connect-timeout=5
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

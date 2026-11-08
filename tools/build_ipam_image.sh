@@ -63,17 +63,21 @@ write_files:
       # wait for docker, then phpIPAM + MariaDB
       for i in \$(seq 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
       cd /opt/ipam && docker compose up -d >/var/log/ipam-compose.log 2>&1
-      # the TLS certificate (self-signed, made once, on the first boot: every VM gets its own key)
+      # the TLS certificate (self-signed, made once, on the first boot: every VM gets its own key); it also names the lab
+      # host's LAN address: the LAN reaches phpIPAM through a TLS passthrough there (user unit evpn-3tier-ipam, :8443)
       if [ ! -s /etc/ipam-tls/ipam.crt ]; then
         mkdir -p /etc/ipam-tls && openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=ipam.evpn-3tier.lab \\
-          -addext "subjectAltName=DNS:ipam.evpn-3tier.lab,IP:\$(ip -4 -o addr show eth0 | awk '{print \$4}' | cut -d/ -f1)" \\
+          -addext "subjectAltName=DNS:ipam.evpn-3tier.lab,IP:\$(ip -4 -o addr show eth0 | awk '{print \$4}' | cut -d/ -f1),IP:192.168.50.231" \\
           -keyout /etc/ipam-tls/ipam.key -out /etc/ipam-tls/ipam.crt 2>/dev/null && chmod 600 /etc/ipam-tls/ipam.key
       fi
       rc-service nginx restart >/dev/null 2>&1
   - path: /etc/nginx/http.d/default.conf
     content: |
       # phpIPAM behind nginx (tools/build_ipam_image.sh): HTTPS :443 (the API needs it: token auth is HTTPS only),
-      # HTTP :80 (the web UI; the Lab Hub's relay to the LAN). phpIPAM itself listens on 127.0.0.1:8080 only.
+      # HTTP :80 (the web UI). phpIPAM itself listens on 127.0.0.1:8080 only. The LAN reaches :443 through a TLS passthrough
+      # on the lab host (192.168.50.231:8443): phpIPAM builds its links from X-Forwarded-Host / -Port, so pass the port
+      # the client used (from its Host header; else the scheme's).
+      map "\$scheme:\$http_host" \$e3t_port { "~:(?<p>[0-9]+)\$" \$p; "~^https:" 443; default 80; }
       server {
           listen 443 ssl default_server;
           ssl_certificate     /etc/ipam-tls/ipam.crt;
@@ -81,8 +85,9 @@ write_files:
           client_max_body_size 20m;
           location / {
               proxy_pass http://127.0.0.1:8080;
-              proxy_set_header Host \$host;
+              proxy_set_header Host \$http_host;
               proxy_set_header X-Forwarded-Proto https;
+              proxy_set_header X-Forwarded-Port \$e3t_port;
               proxy_set_header X-Forwarded-For \$remote_addr;
           }
       }
@@ -91,8 +96,9 @@ write_files:
           client_max_body_size 20m;
           location / {
               proxy_pass http://127.0.0.1:8080;
-              proxy_set_header Host \$host;
+              proxy_set_header Host \$http_host;
               proxy_set_header X-Forwarded-Proto http;
+              proxy_set_header X-Forwarded-Port \$e3t_port;
               proxy_set_header X-Forwarded-For \$remote_addr;
           }
       }
