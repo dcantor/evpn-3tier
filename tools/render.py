@@ -108,9 +108,10 @@ def underlay(inv, n):
     for p in _fabric_ports(n):
         nb = f"set protocols bgp neighbor {p['name']}"
         out += [f"{nb} interface remote-as external", f"{nb} description '{p['peer']}'", f"{nb} bfd profile {BFD_PROFILE}",
-                f"{nb} address-family ipv4-unicast", f"{nb} address-family l2vpn-evpn"]
-        if n["role"] == "spine":
-            out.append(f"{nb} address-family l2vpn-evpn attribute-unchanged next-hop")
+                f"{nb} address-family ipv4-unicast"]
+        # a spine's l2vpn-evpn has a setting under it: VyOS lists only the deepest line (show configuration commands), so
+        # the bare line would look missing to a line-by-line comparer (Ansible's vyos_config) on every run
+        out.append(f"{nb} address-family l2vpn-evpn attribute-unchanged next-hop" if n["role"] == "spine" else f"{nb} address-family l2vpn-evpn")
     return out
 
 
@@ -249,7 +250,6 @@ def firewall(inv, n):
            f"{b} description 'ES {seg['es']}: LACP to {', '.join(l['switch'] for l in seg['legs'])}'",
            *[f"{b} member interface {l}" for l in legs],
            f"set interfaces ethernet {sync} address {inv['wan']['sync'][me]}",
-           f"set interfaces ethernet {sync} description 'state sync: {next(p['peer'] for p in n['ports'] if p.get('kind') == 'sync')}'",
            f"set protocols bgp system-as {n['asn']}", f"set protocols bgp parameters router-id {n['loopback']}",
            f"set protocols bgp address-family ipv4-unicast maximum-paths ebgp {inv['max_paths']}",
            "set protocols bgp parameters bestpath as-path multipath-relax", "set protocols bgp parameters log-neighbor-changes",

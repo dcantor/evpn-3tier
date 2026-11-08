@@ -33,35 +33,29 @@ set protocols bgp neighbor eth1 interface remote-as external
 set protocols bgp neighbor eth1 description 'leaf1'
 set protocols bgp neighbor eth1 bfd profile fabric
 set protocols bgp neighbor eth1 address-family ipv4-unicast
-set protocols bgp neighbor eth1 address-family l2vpn-evpn
 set protocols bgp neighbor eth1 address-family l2vpn-evpn attribute-unchanged next-hop
 set protocols bgp neighbor eth2 interface remote-as external
 set protocols bgp neighbor eth2 description 'leaf2'
 set protocols bgp neighbor eth2 bfd profile fabric
 set protocols bgp neighbor eth2 address-family ipv4-unicast
-set protocols bgp neighbor eth2 address-family l2vpn-evpn
 set protocols bgp neighbor eth2 address-family l2vpn-evpn attribute-unchanged next-hop
 set protocols bgp neighbor eth3 interface remote-as external
 set protocols bgp neighbor eth3 description 'leaf3'
 set protocols bgp neighbor eth3 bfd profile fabric
 set protocols bgp neighbor eth3 address-family ipv4-unicast
-set protocols bgp neighbor eth3 address-family l2vpn-evpn
 set protocols bgp neighbor eth3 address-family l2vpn-evpn attribute-unchanged next-hop
 set protocols bgp neighbor eth4 interface remote-as external
 set protocols bgp neighbor eth4 description 'leaf4'
 set protocols bgp neighbor eth4 bfd profile fabric
 set protocols bgp neighbor eth4 address-family ipv4-unicast
-set protocols bgp neighbor eth4 address-family l2vpn-evpn
 set protocols bgp neighbor eth4 address-family l2vpn-evpn attribute-unchanged next-hop
 set protocols bgp neighbor eth5 interface remote-as external
 set protocols bgp neighbor eth5 description 'border1'
 set protocols bgp neighbor eth5 bfd profile fabric
 set protocols bgp neighbor eth5 address-family ipv4-unicast
-set protocols bgp neighbor eth5 address-family l2vpn-evpn
 set protocols bgp neighbor eth5 address-family l2vpn-evpn attribute-unchanged next-hop
 set protocols bgp neighbor eth6 interface remote-as external
 set protocols bgp neighbor eth6 description 'border2'
 set protocols bgp neighbor eth6 bfd profile fabric
 set protocols bgp neighbor eth6 address-family ipv4-unicast
-set protocols bgp neighbor eth6 address-family l2vpn-evpn
 set protocols bgp neighbor eth6 address-family l2vpn-evpn attribute-unchanged next-hop

@@ -2,6 +2,18 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-11-08
+
+### Added
+- CI/CD from Nautobot with Ansible (Gitea lab/evpn-3tier-ansible, runner `ansible`): `tools/nautobot_seed.py` puts the
+  lab into Nautobot (location / namespace / tenant group evpn-3tier: devices, interfaces, MACs, cables, IPAM, VRFs,
+  VLANs, a config context); the pipeline renders the Ansible inventory from Nautobot's GraphQL API, commits it to Gitea
+  every run, renders every VyOS config with Jinja2 (identical to tools/render.py), runs check mode, applies and verifies.
+
+### Fixed
+- Spines: only `... l2vpn-evpn attribute-unchanged next-hop` (VyOS lists only the deepest line, so the bare one was
+  re-sent by a line-by-line comparer on every run). The firewalls' eth3 description is set once (two lines set it).
+
 ## [0.5.1] - 2026-11-08
 
 ### Fixed

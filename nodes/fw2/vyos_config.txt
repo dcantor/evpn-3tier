@@ -21,7 +21,6 @@ set interfaces bonding bond0 description 'ES 12: LACP to border1, border2'
 set interfaces bonding bond0 member interface eth1
 set interfaces bonding bond0 member interface eth2
 set interfaces ethernet eth3 address 172.31.255.2/29
-set interfaces ethernet eth3 description 'state sync: fw1'
 set protocols bgp system-as 65200
 set protocols bgp parameters router-id 10.61.0.32
 set protocols bgp address-family ipv4-unicast maximum-paths ebgp 4

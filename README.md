@@ -60,6 +60,33 @@ shell command on any node.
 5. Portal (8119), Lab Hub, NMS — **done (0.5.0)**
 6. Optional: L4 load-balancing experiments
 
+## CI/CD: Nautobot -> Ansible (Gitea lab/evpn-3tier-ansible)
+
+Since 0.6.0 the lab is **deployed from Nautobot by Ansible**, through a pipeline on the local Gitea:
+http://192.168.50.231:3000/lab/evpn-3tier-ansible (private; its README has the details).
+
+```
+Nautobot 10.0.0.10:8080 ──GraphQL──► inventory (committed to Gitea every run) ──► check --diff ──► apply ──► verify
+location evpn-3tier                  Jinja2 templates: every VyOS config         runner `ansible` on this host
+```
+
+- **Nautobot** (location / namespace / tenant group `evpn-3tier`): 19 devices `e3t-*` with roles, racks, platforms,
+  primary IPs (Ansible's `ansible_host`), interfaces with MACs, cables (label = link kind), loopbacks, the servers' tier
+  addresses, VRFs with route targets, VLANs, prefixes; config context `evpn-3tier` for the plan Nautobot has no model
+  for (VNIs, transit / wan / sync plan, VIP, firewall policy, ES). Seeded from lab.conf by `tools/nautobot_seed.py`
+  (idempotent); after that, edits go to Nautobot.
+- **Ansible** (Gitea repo): `inventory/nautobot_inventory.py` rebuilds this lab's model from Nautobot (identical to
+  `lab.sh inventory` when seeded); `templates/vyos/*.j2` render every VyOS config (identical to tools/render.py, 11 of
+  11); playbooks deploy the VyOS helper scripts and configs, then the Linux network and the tiers (rolling).
+- **Runner:** `lab-host-ansible` (label `ansible`, user unit `gitea-runner-ansible`, host mode), toolchain in
+  `~/.local/share/e3t-ansible` (ansible-core 2.20, vyos.vyos 6.2, ansible.netcommon, ansible.utils, community.general).
+- **Pipeline** (push to main or Run workflow): inventory from Nautobot -> committed to Gitea (`[skip ci]`) -> render +
+  drift report against lab.conf -> check mode with diff -> apply -> `lab.sh verify --quick`; holds the test lock.
+  Proven: a value changed only in Nautobot (vrf_max_paths 32 -> 16) reached every leaf and border and verified 61/61.
+- `tools/pipeline.py status | run | log [N] | wait` (in the Gitea repo): the pipeline from the shell.
+
+`lab.sh configure` / `services` still work (lab.conf); while Nautobot is edited they would push lab.conf's values back.
+
 ## The portal, the Lab Hub, the NMS
 
 **Portal:** http://192.168.50.231:8119 (sign in at the Lab Hub; user unit `evpn-3tier-webapp`, `./lab.sh webapp`).
@@ -157,6 +184,10 @@ lb1 / web1 lose a few now and then. The Robot suites (tests/suites/01-09) assert
   haproxy, nginx, postgresql and the app (from `local`, which runs last, keepalived exited for good).
 - **Load measurements:** a request still in flight when the failure starts belongs to the failure (the baseline ends
   5.5 s before the injection), and the loader's clock (wan's) is offset against the host's.
+- **VyOS lists only the deepest line** (`show configuration commands`): a spine's bare `address-family l2vpn-evpn` sits
+  under `attribute-unchanged next-hop`, so Ansible's vyos_config (line by line) sent it on every run. The renderer emits
+  only the deeper line. And two lines set fw eth3's description (the last won on a commit; Ansible saw the other missing).
+- **ansible-core 2.21+ has no paramiko_ssh:** without sshpass on the host, the pipeline pins ansible-core 2.20.
 - **OpenRC can remember a crashed PostgreSQL:** `rc-service postgresql start` then says "already started" and does
   nothing; re-seeding a replica (tools/dbctl.py) zaps the state and stops any leftover postmaster first. And
   `pg_basebackup -R` appends a `primary_conninfo` to the copied postgresql.auto.conf, which already holds the source's:
