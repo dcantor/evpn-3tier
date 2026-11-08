@@ -7,7 +7,8 @@ a first deploy (db primary, db replica, app, web, lb), which is the default orde
         An existing data directory is kept: a replica is re-seeded only with --reseed.
   app   app/app.py as the OpenRC service e3t-app (supervise-daemon, respawns), :8080
   web   nginx: the page (app/index.html), /health, and /api/ proxied to every app server (no load balancer: nginx
-        tries the next one on error / timeout and rests a failed one for 10 s), X-Web-Node on every response
+        tries the next one on a connection error / timeout, rests one that failed 3 times for 5 s; a 503 from the app
+        — the database failed — does not count), X-Web-Node on every response
   lb    HAProxy: :443 (TLS, a self-signed lab certificate made once in nodes/.lb-cert/), :80 -> https, round robin over
         the web servers with an HTTP health check every second; stats on the OOB address :8404. keepalived: the web
         VIP (VRRP, unicast between the two, lb1 priority 150, preempting), tracking HAProxy
@@ -133,7 +134,8 @@ def deploy_app(n):
 
 # ---- web --------------------------------------------------------------------------------------------------------------
 def nginx_conf():
-    ups = "\n".join(f"    server {ip(a)}:8080 max_fails=1 fail_timeout=10s;" for a in nodes("app"))
+    # max_fails 3 in 5 s: one slow answer (the database paused for a leaf failure) must not evict an app server
+    ups = "\n".join(f"    server {ip(a)}:8080 max_fails=3 fail_timeout=5s;" for a in nodes("app"))
     return f"""# evpn-3tier (tools/services.py): the web tier
 upstream app {{
 {ups}
@@ -151,7 +153,9 @@ server {{
         proxy_set_header X-Web-Node $hostname;
         proxy_connect_timeout 2s;
         proxy_read_timeout 6s;
-        proxy_next_upstream error timeout http_502 http_503;
+        # not http_503: the app answers 503 when the DATABASE fails — that is no reason to mark the app server down
+        # (with it, a 3 s database pause evicted both app servers for 10 s: 13 s of 502s for everyone)
+        proxy_next_upstream error timeout http_502;
         proxy_next_upstream_tries 2;
     }}
     location / {{ try_files $uri /index.html; }}
@@ -236,6 +240,12 @@ vrrp_instance WEB {{
     state BACKUP
     interface {vif}
     virtual_router_id 10
+    # the VIP on the VRRP virtual MAC (00:00:5e:00:01:0a), whoever holds it: the fabric's ARP entries for the VIP never
+    # change, only where the MAC lives (one Ethernet Segment or the other), which EVPN MAC mobility moves. With the
+    # holder's own MAC, the border the gratuitous ARP did not hash to kept the old MAC for minutes (EVPN-MH neighbour
+    # sync is not installed by this kernel; the fabric keeps neighbours REACHABLE 5 min) — half the flows black-holed
+    use_vmac vrrp.10
+    vmac_xmit_base
     priority {150 if first else 100}
     advert_int 1
     unicast_src_ip {ip(n)}
@@ -243,7 +253,7 @@ vrrp_instance WEB {{
 {peers}
     }}
     virtual_ipaddress {{
-        {inv['web_vip']}/{plen} dev {vif}
+        {inv['web_vip']}/{plen}
     }}
     garp_master_refresh 10
     track_script {{

@@ -2,4 +2,3 @@ netmiko>=4
 paramiko>=3
 requests>=2.31
 robotframework>=7
-pynautobot>=3.1

@@ -83,10 +83,12 @@ set protocols bgp neighbor 172.16.199.2 remote-as 65121
 set protocols bgp neighbor 172.16.199.2 description 'border1 (outside)'
 set protocols bgp neighbor 172.16.199.2 bfd profile fabric
 set protocols bgp neighbor 172.16.199.2 address-family ipv4-unicast route-map export TO-OUTSIDE
+set protocols bgp neighbor 172.16.199.2 address-family ipv4-unicast as-override
 set protocols bgp neighbor 172.16.199.3 remote-as 65122
 set protocols bgp neighbor 172.16.199.3 description 'border2 (outside)'
 set protocols bgp neighbor 172.16.199.3 bfd profile fabric
 set protocols bgp neighbor 172.16.199.3 address-family ipv4-unicast route-map export TO-OUTSIDE
+set protocols bgp neighbor 172.16.199.3 address-family ipv4-unicast as-override
 set firewall ipv4 name WEB-APP default-action drop
 set firewall ipv4 name WEB-APP default-log
 set firewall ipv4 name WEB-APP rule 1 action accept

@@ -58,6 +58,10 @@ def gaps(lines, t0, t1):
 # the kills run in their own SSH session: a shell whose command line also holds the started program would match its
 # own pattern and kill itself
 run(a.dst, "pkill -f [e]3t-echo", inv=inv); run(a.src, "pkill -f [e]3t-client", inv=inv)
+# the echo server needs the port the policy allows (8080), where the app runs: pause the app on this server for the
+# test (nginx uses the other app server meanwhile) and start it again at the end
+had_app = run(a.dst, "doas rc-service -q e3t-app status", inv=inv)[0] == 0
+if had_app: run(a.dst, "doas rc-service -q e3t-app stop", inv=inv); time.sleep(1)
 run(a.dst, SERVER, inv=inv); time.sleep(1)
 run(a.src, CLIENT, inv=inv); time.sleep(3)
 print(f"connection {a.src} -> {a.dst}:{a.port} open; state on the firewalls: {crossing()}")
@@ -68,6 +72,7 @@ print("starting fw1 ..."); t_on = time.time(); virsh("start", fw1["domain"])
 print(f"waiting {a.settle} s for fw1 to boot and take the traffic back ..."); time.sleep(a.settle)
 print(f"state on the firewalls: {crossing()}")
 _, log = run(a.src, f"cat {LOG}", inv=inv); run(a.src, "pkill -f [e]3t-client", inv=inv); run(a.dst, "pkill -f [e]3t-echo", inv=inv)
+if had_app: run(a.dst, "doas rc-service -q e3t-app start", inv=inv)
 lines = log.splitlines(); end = [l for l in lines if l.startswith(("closed", "error"))]
 g1, g2 = gaps(lines, t_off, t_on), gaps(lines, t_on, time.time())
 print(f"\nfailover to fw2: longest gap {g1:.2f} s" if g1 is not None else "\nfailover to fw2: no echoes during the outage")

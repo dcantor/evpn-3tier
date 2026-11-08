@@ -97,7 +97,7 @@ import json, time
 def app():
     out = []; vip = inv["web_vip"]; clients = str(ipaddress.ip_network(inv["wan"]["clients"]).network_address + 1)
     lbs = sorted(by_role("lb"), key=lambda n: n["idx"])
-    has = {l["name"]: f" {vip}/" in run(l["name"], f"ip -br a show bond0.{l['net']['vlan']}", inv=inv)[1] for l in lbs}
+    has = {l["name"]: f" {vip}/" in run(l["name"], "ip -br a", inv=inv)[1] for l in lbs}
     out.append((f"web VIP {vip} on {lbs[0]['name']} only", has[lbs[0]["name"]] and not any(has[l["name"]] for l in lbs[1:]), f"held: {has}"))
     curl = f"curl -sk -m5 --interface {clients}"
     _, o = run("wan", "; ".join([f"{curl} https://{vip}/api/info; echo"] * 12), timeout=120, inv=inv)

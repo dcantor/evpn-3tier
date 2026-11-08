@@ -2,6 +2,38 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-11-08
+
+### Added
+- Phase 4: `./lab.sh chaos <lb|web|app|db|leaf|border|fw|all>` (tools/chaos.py) — a component powered off for 20 s
+  under load from wan (an HTTPS read every 100 ms, a write every second, fresh connections) and back; per phase:
+  requests, failures, longest gap, which nodes served. Measured: lb1, web1, app1, fw1, leaf1 0 lost; border1 4 reads;
+  db1 (db2 promoted 5 s later) 32 reads / 3 writes, 3.3 s.
+- `./lab.sh db status|promote|reseed|switchover` (tools/dbctl.py).
+- The Robot suites (tests/, `./lab.sh test`): 01 fabric, 02 firewalls, 03 data plane, 04 application, 05 policy,
+  06 server failures, 07 network failures, 08 database failover, 09 a live connection through fw1 failover — 14 tests;
+  06-09 tagged disruptive. Results in results/<timestamp>/ and results/latest (for the Lab Hub, phase 5), with every
+  router's configuration before and after and their diff.
+
+### Fixed
+- The web VIP on the VRRP virtual MAC (keepalived use_vmac): with the holder's MAC, one border kept the old one for
+  minutes after a move (the gratuitous ARP reaches one border; EVPN-MH neighbour sync is not installed by this kernel)
+  and black-holed half the flows.
+- The firewalls' outside sessions use as-override: the web route came back to the border it came from and was dropped
+  as a loop, so one border's VRF outside never had it — a total outage with the other border down.
+- Ethernet Segment bonds boot disabled and the protodown watcher raises them when EVPN has converged: a rebooting
+  leaf no longer attracts its servers' traffic early (~6 s of loss before). `configure` refuses to push if the watcher
+  cannot run (a broken watcher left every bond down once during development).
+- nginx no longer marks app servers down for the app's 503 (the database failed): a 3 s database pause had evicted both
+  for 10 s. Now 3 failures in 5 s, connection errors and timeouts only.
+- The Linux VMs' network is an OpenRC service before keepalived / haproxy / nginx / postgresql / the app: keepalived
+  started before the VLAN existed and quit at every boot of a load balancer. Rebuilding the bond restarts keepalived.
+- fw_failover pauses the app on app1 (it needs port 8080 for its echo server).
+
+### Open
+- After a fail-back the standby firewall may lack long-idle connections until their state changes (not yet tested:
+  double failover with an idle connection).
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

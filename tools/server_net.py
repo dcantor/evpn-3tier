@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """The Linux VMs' network: render each one's boot script and push it (lab.sh configure <node>).
 
-/etc/local.d/evpn-3tier-net.start (OpenRC `local` service, so it runs at every boot) builds, from scratch each time:
+/usr/local/sbin/e3t-net (run by the OpenRC service e3t-net at every boot, BEFORE keepalived, haproxy, nginx, postgresql
+and the app: they need the tier VLAN — keepalived started before it existed exits for good, "Non-existent interface")
+builds, from scratch each time:
   bond0      802.3ad (LACP, fast, layer3+4) over eth1 + eth2, the links to the VM's leaf pair (servers) or the border
              pair (load balancers); on the switches the two legs are one EVPN Ethernet Segment
   bond0.V    the VM's tier VLAN, its address .<hostnum>, default route via the anycast gateway .1; the OOB network
@@ -14,7 +16,14 @@ from pathlib import Path
 import paramiko
 
 LAB = Path(__file__).resolve().parents[1]
-SCRIPT = "/etc/local.d/evpn-3tier-net.start"
+SCRIPT = "/usr/local/sbin/e3t-net"
+OLD = "/etc/local.d/evpn-3tier-net.start"            # 0.1-0.3: from `local`, which runs last — too late
+INIT = """#!/sbin/openrc-run
+# evpn-3tier (tools/server_net.py): the bond and the tier VLAN, before the services that use them
+description="evpn-3tier: bond0 + tier VLAN"
+depend() { need net; before keepalived haproxy nginx postgresql e3t-app; }
+start() { ebegin "Building bond0 and the tier VLAN"; /usr/local/sbin/e3t-net >/dev/null 2>&1; eend $?; }
+"""
 
 
 def inventory():
@@ -45,8 +54,12 @@ def push(inv, name):
     c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     c.connect(n["mgmt_ip"], username="lab", password="lab", look_for_keys=False, allow_agent=False, timeout=20)
     try:
-        i, o, e = c.exec_command(f"doas tee {SCRIPT} >/dev/null && doas chmod 755 {SCRIPT}"
-                                 f" && doas rc-update add local default >/dev/null 2>&1; doas sh {SCRIPT} 2>&1; echo rc=$?", timeout=60)
+        i, o, e = c.exec_command("doas tee /etc/init.d/e3t-net >/dev/null && doas chmod 755 /etc/init.d/e3t-net", timeout=30)
+        i.write(INIT); i.channel.shutdown_write(); o.channel.recv_exit_status()
+        i, o, e = c.exec_command(f"doas rm -f {OLD}; doas mkdir -p /usr/local/sbin && doas tee {SCRIPT} >/dev/null && doas chmod 755 {SCRIPT}"
+                                 f" && doas rc-update add e3t-net default >/dev/null 2>&1; doas sh {SCRIPT} 2>&1; rc=$?;"
+                                 # keepalived loses its interface when the bond is rebuilt: restart it if it runs here
+                                 f" doas rc-service -q keepalived status >/dev/null 2>&1 && doas rc-service -q keepalived restart >/dev/null 2>&1; echo rc=$rc", timeout=60)
         i.write(script); i.channel.shutdown_write()
         out = o.read().decode() + e.read().decode()
     finally:

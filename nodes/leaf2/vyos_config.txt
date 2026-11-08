@@ -153,6 +153,7 @@ set interfaces bonding bond1 evpn es-id 1
 set interfaces bonding bond1 evpn es-sys-mac 02:00:00:00:e3:01
 set interfaces bonding bond1 evpn es-df-pref 100
 set interfaces bonding bond1 description 'ES 1: web1 (with leaf1)'
+set interfaces bonding bond1 disable
 set interfaces bridge br0 member interface bond1 allowed-vlan 10
 set interfaces bonding bond2 mode 802.3ad
 set interfaces bonding bond2 lacp-rate fast
@@ -163,6 +164,7 @@ set interfaces bonding bond2 evpn es-id 2
 set interfaces bonding bond2 evpn es-sys-mac 02:00:00:00:e3:02
 set interfaces bonding bond2 evpn es-df-pref 100
 set interfaces bonding bond2 description 'ES 2: app1 (with leaf1)'
+set interfaces bonding bond2 disable
 set interfaces bridge br0 member interface bond2 allowed-vlan 20
 set interfaces bonding bond3 mode 802.3ad
 set interfaces bonding bond3 lacp-rate fast
@@ -173,4 +175,5 @@ set interfaces bonding bond3 evpn es-id 3
 set interfaces bonding bond3 evpn es-sys-mac 02:00:00:00:e3:03
 set interfaces bonding bond3 evpn es-df-pref 100
 set interfaces bonding bond3 description 'ES 3: db1 (with leaf1)'
+set interfaces bonding bond3 disable
 set interfaces bridge br0 member interface bond3 allowed-vlan 30

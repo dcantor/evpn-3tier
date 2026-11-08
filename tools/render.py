@@ -200,7 +200,9 @@ def access(inv, n):
         others = ", ".join(l["switch"] for l in seg["legs"] if l["switch"] != n["name"])
         out += [f"{b} mode 802.3ad", f"{b} lacp-rate fast", f"{b} min-links 1", f"{b} member interface {p['name']}",
                 f"{b} system-mac {seg['sys_mac']}", f"{b} evpn es-id {seg['es']}", f"{b} evpn es-sys-mac {seg['sys_mac']}",
-                f"{b} evpn es-df-pref {pref}", f"{b} description 'ES {seg['es']}: {seg['node']} (with {others})'"]
+                f"{b} evpn es-df-pref {pref}", f"{b} description 'ES {seg['es']}: {seg['node']} (with {others})'",
+                # boots down: the protodown watcher (tools/vyos_files.py) raises it once EVPN has converged
+                f"{b} disable"]
         out += [f"set interfaces bridge br0 member interface {bond} allowed-vlan {v}" for v in seg["vlans"]]
     return out
 
@@ -271,6 +273,11 @@ def firewall(inv, n):
             nb = f"set protocols bgp neighbor {cidr.split('/')[0]}"
             out += [f"{nb} remote-as {_asn(inv, border)}", f"{nb} description '{border} ({t['vrf']})'", f"{nb} bfd profile {BFD_PROFILE}",
                     f"{nb} address-family ipv4-unicast route-map export {'TO-OUTSIDE' if t['vrf'] == 'outside' else 'TO-TIER'}"]
+            if t["vrf"] == "outside":
+                # the web subnet reaches the firewall from a border (AS path "65122 ..."); sent on to that same border's
+                # VRF outside it was dropped as a loop — so one border's outside never had it, and with the other border
+                # down wan had no route at all. as-override puts the firewall's AS in place of the border's
+                out.append(f"{nb} address-family ipv4-unicast as-override")
             if t["vrf"] != "outside":   # FRR's default-originate skips the export route-map: fw2 prepends through its own
                 out.append(f"{nb} address-family ipv4-unicast default-originate" + (" route-map ORIGINATE" if standby else ""))
     return out

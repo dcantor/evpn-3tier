@@ -156,19 +156,37 @@ def backups():
         syslog.syslog(f"{p}: bridge backup {'vxlan0 nhid ' + str(want) if want else 'removed'} (segment {e.get('esi')})")
 
 
+def evpn_settled_since(state={"since": None}):
+    # when every BGP session carrying EVPN became Established (None while any is not)
+    d = vtysh("show bgp l2vpn evpn summary json") or {}
+    peers = list((d.get("peers") or {}).values())
+    if peers and all(p.get("state") == "Established" for p in peers):
+        state["since"] = state["since"] or time.time()
+    else:
+        state["since"] = None
+    return state["since"]
+
+
+# evpn-3tier: the segment bonds boot DISABLED (tools/render.py) and this watcher owns their admin state from then on.
+# Up only when FRR names no protodown reason — or only its startup delay (whose timer started at boot with FRR's 180 s
+# default) while every EVPN session has been Established for SETTLE s. A bond VyOS brought up at boot attracted the
+# servers' traffic (LACP aggregates in ~1 s) into a leaf that had not converged yet: ~6 s of loss on every reboot.
+SETTLE = 20
 downed, ports, tick = load(), set(), 0
 while True:
     evpn, es = vtysh("show evpn json"), vtysh("show evpn es json")
     if evpn is not None and es is not None:
         ports |= {e["accessPort"] for e in es if "local" in e.get("flags", []) and e.get("accessPort")}
         reasons = evpn.get("protodownReasons") or []
+        since = evpn_settled_since()
+        ok = not reasons or (set(reasons) <= {"startup-delay"} and since is not None and time.time() - since >= SETTLE)
         for p in sorted(ports):
-            if reasons and admin_up(p):
+            if not ok and admin_up(p):
                 subprocess.run(["ip", "link", "set", p, "down"]); downed.add(p)
-                syslog.syslog(f"{p} down: FRR protodown ({', '.join(reasons)})")
-            elif not reasons and p in downed:
+                syslog.syslog(f"{p} down: FRR protodown ({', '.join(reasons) or 'EVPN not settled'})")
+            elif ok and not admin_up(p):
                 subprocess.run(["ip", "link", "set", p, "up"]); downed.discard(p)
-                syslog.syslog(f"{p} up: no protodown reason left")
+                syslog.syslog(f"{p} up: no protodown reason left" + (f" (startup delay waived: EVPN settled {SETTLE} s)" if reasons else ""))
         open(STATE, "w").write(" ".join(sorted(downed)))
         tick += 1
         if tick % 10 == 0: heal_redirects(ports, reasons)
@@ -265,6 +283,9 @@ def push(inv, node, n):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["check"]:            # lab.sh configure runs this BEFORE pushing any config: the segment bonds boot
+        compile(PROTODOWN_PY, "protodown watcher", "exec")   # disabled, and only this watcher raises them
+        print("vyos_files: ok"); sys.exit(0)
     if len(sys.argv) < 3 or sys.argv[1] != "push": sys.exit(__doc__)
     inv = json.loads(subprocess.run([str(LAB / "lab.sh"), "inventory"], capture_output=True, text=True, check=True).stdout)
     N = {n["name"]: n for n in inv["nodes"]}

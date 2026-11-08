@@ -170,6 +170,7 @@ set interfaces bonding bond11 evpn es-id 11
 set interfaces bonding bond11 evpn es-sys-mac 02:00:00:00:e3:0b
 set interfaces bonding bond11 evpn es-df-pref 200
 set interfaces bonding bond11 description 'ES 11: fw1 (with border2)'
+set interfaces bonding bond11 disable
 set interfaces bridge br0 member interface bond11 allowed-vlan 110
 set interfaces bridge br0 member interface bond11 allowed-vlan 120
 set interfaces bridge br0 member interface bond11 allowed-vlan 130
@@ -183,6 +184,7 @@ set interfaces bonding bond12 evpn es-id 12
 set interfaces bonding bond12 evpn es-sys-mac 02:00:00:00:e3:0c
 set interfaces bonding bond12 evpn es-df-pref 200
 set interfaces bonding bond12 description 'ES 12: fw2 (with border2)'
+set interfaces bonding bond12 disable
 set interfaces bridge br0 member interface bond12 allowed-vlan 110
 set interfaces bridge br0 member interface bond12 allowed-vlan 120
 set interfaces bridge br0 member interface bond12 allowed-vlan 130
@@ -196,6 +198,7 @@ set interfaces bonding bond13 evpn es-id 13
 set interfaces bonding bond13 evpn es-sys-mac 02:00:00:00:e3:0d
 set interfaces bonding bond13 evpn es-df-pref 200
 set interfaces bonding bond13 description 'ES 13: lb1 (with border2)'
+set interfaces bonding bond13 disable
 set interfaces bridge br0 member interface bond13 allowed-vlan 10
 set interfaces bonding bond14 mode 802.3ad
 set interfaces bonding bond14 lacp-rate fast
@@ -206,6 +209,7 @@ set interfaces bonding bond14 evpn es-id 14
 set interfaces bonding bond14 evpn es-sys-mac 02:00:00:00:e3:0e
 set interfaces bonding bond14 evpn es-df-pref 200
 set interfaces bonding bond14 description 'ES 14: lb2 (with border2)'
+set interfaces bonding bond14 disable
 set interfaces bridge br0 member interface bond14 allowed-vlan 10
 set interfaces ethernet eth7 address 172.31.1.0/31
 set interfaces ethernet eth7 vrf outside

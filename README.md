@@ -40,6 +40,9 @@ tools/build_image.sh    # once: images/e3t-alpine.qcow2
 ./lab.sh services       # the application: PostgreSQL primary + replica, app, nginx, HAProxy + keepalived
 ./lab.sh verify         # 65 checks: fabric, firewalls, data plane, the application end to end, the policy matrix
 ./lab.sh fw-failover    # power fw1 off under a live web1 -> app1 connection, and back (~4 min)
+./lab.sh chaos lb       # a component fails under load and comes back: lb | web | app | db | leaf | border | fw | all
+./lab.sh db status      # PostgreSQL roles (promote / reseed / switchover too)
+./lab.sh test           # the Robot suites, ~35 min (--exclude disruptive: ~3 min); results/latest/
 ./lab.sh status
 ./lab.sh down
 ```
@@ -53,7 +56,7 @@ shell command on any node.
 1. Fabric, VRFs, ESI-LAG — **done (0.1.0)**
 2. Firewall policy (zones, per-tier rules), conntrack-sync, fw failover — **done (0.2.0)**
 3. HAProxy + keepalived (web VIP), nginx, the app tier, PostgreSQL primary + replica — **done (0.3.0)**
-4. Failure tests and the Robot suite
+4. Failure tests and the Robot suite — **done (0.4.0)**
 5. Portal (8119), Lab Hub, NMS
 6. Optional: L4 load-balancing experiments
 
@@ -95,11 +98,44 @@ over the sync link (172.31.255.0/29); VyOS ties it to VRRP (group FWSYNC on the 
 fw2; fw1 back -> 1.8 s again, back through fw1. Not yet covered: after a fail-back the standby learns only connections
 whose state changes, so a long-idle connection may be missing on it until then (phase 4: double failover).
 
+## Failures
+
+`./lab.sh chaos <scenario>`: wan's clients send an HTTPS read every 100 ms and an order every second, each on a fresh
+connection through the firewall to the VIP; one component is powered off for 20 s and back. Measured (0.4.0):
+
+| Scenario | What takes over | Lost while down | Longest gap | Back |
+|---|---|---|---|---|
+| lb1 off | keepalived: VIP (virtual MAC) to lb2 | 0 | 0.1 s | 0 lost |
+| web1 off | HAProxy health check + redispatch | 0 | 0.1 s | 0 lost |
+| app1 off | nginx: the other app server | 0 | 0.1 s | 0 lost |
+| fw1 off | BFD + BGP: every VRF to fw2; conntrack-sync | 0 | 0.1 s | 0 lost |
+| leaf1 off | EVPN multihoming: the servers' other leg | 0 | 0.1 s | 0 lost |
+| border1 off | border2 for firewalls, load balancers, wan | 4 reads | 0.3 s | 0 lost |
+| db1 off, db2 promoted 5 s later | the app finds the new primary itself | 32 reads, 3 writes | 3.3 s | switched back |
+
+The Robot suites (tests/suites/01-09) assert these with some room; 06-09 are tagged `disruptive`.
+
 ## Things that are not obvious
 
 - **No /32s to the firewalls.** advertise-svi-ip puts the other border's transit address into the VRF as a /32; exported
   to the firewalls it routed their BFD / BGP to that border through this one (TTL - 1, the sessions died). See TO-FW.
 - **VLAN IDs stop at 4094.** VyOS dropped VLAN 4099 lines without an error.
+- **The VIP needs a MAC that does not move** (`use_vmac`). With the holder's own MAC, lb2's gratuitous ARP reached one
+  border only (a bond hashes broadcasts by MAC), and the other kept lb1's MAC for minutes: this kernel rejects
+  EVPN-MH neighbour sync, and the fabric keeps neighbours REACHABLE 5 min. Half the flows went to a dead lb.
+- **One border's VRF outside never had the web route:** fw1 learns it from a border and the same border dropped it on
+  the way back (its own AS in the path). With the other border down, wan had no route at all. `as-override` on the
+  firewalls' outside sessions.
+- **Segment bonds boot disabled; the protodown watcher raises them** once FRR has no protodown reason (or only its
+  startup delay, with EVPN settled 20 s). Up straight from VyOS's config, a rebooting leaf attracted its servers'
+  traffic before EVPN had converged (~6 s of loss). `lab.sh configure` refuses to push if the watcher cannot run.
+- **A database pause must not evict app servers:** nginx counted the app's 503 (database down) and read timeouts against
+  the app server, evicted both for 10 s, and turned 3 s of leaf failover into 13 s of 502s. Now: connection errors and
+  timeouts only, 3 in 5 s.
+- **keepalived needs its interface at boot:** the network is an OpenRC service (`e3t-net`) ordered before keepalived,
+  haproxy, nginx, postgresql and the app (from `local`, which runs last, keepalived exited for good).
+- **Load measurements:** a request still in flight when the failure starts belongs to the failure (the baseline ends
+  5.5 s before the injection), and the loader's clock (wan's) is offset against the host's.
 - **BusyBox `pgrep -x haproxy` never matches** (keepalived's check failed, both load balancers sat in FAULT): `pidof`.
 - **nginx -t needs /run/nginx,** which only the init script creates; **`$$` in SQL** does not survive two shells — the
   roles are created from a file.

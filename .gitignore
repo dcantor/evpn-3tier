@@ -16,3 +16,4 @@ images/*.qcow2
 images/.builder/
 images/build.log
 nodes/.lb-cert/
+results-run.log

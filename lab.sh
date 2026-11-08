@@ -248,6 +248,9 @@ cmd_bootstrap() {  # push the day-0 config to VyOS nodes over their serial conso
 }
 cmd_configure() {  # (re)apply nodes/<n>/vyos_config.txt over SSH — idempotent; Linux VMs: bond, VLAN, routes (tools/server_net.py)
   need_python
+  # the segment bonds are rendered `disable`d and only the watcher installed by vyos_files.py raises them: never push
+  # configs with a vyos_files.py that cannot run (0.4.0 development: every bond in the lab stayed down)
+  [[ -z "$(vyos_nodes_or_all "$@")" ]] || "$PY" "$LAB_DIR/tools/vyos_files.py" check >/dev/null || die "tools/vyos_files.py is broken: nothing pushed"
   local n lx=() vy=(); for n in $(vyos_nodes_or_all "$@"); do "$PY" "$LAB_DIR/tools/vyos_push.py" "${MGMT_IP[$n]}" "$(node_dir "$n")/vyos_config.txt" | sed "s/^/[$n] /"; vy+=("$n"); done
   [[ ${#vy[@]} -eq 0 ]] || "$PY" "$LAB_DIR/tools/vyos_files.py" push "${vy[@]}"
   for n in $(linux_nodes_or_all "$@"); do lx+=("$n"); done
@@ -307,6 +310,9 @@ cmd_ssh() {
 cmd_show() { local n="${1:?node}"; shift; known "$n"; is_vyos "$n" || die "$n is not a VyOS node"; need_python; "$PY" "$LAB_DIR/tools/vyos_cmd.py" "${MGMT_IP[$n]}" "$*"; }
 cmd_log() { tail -n "${2:-50}" -f "$(node_dir "${1:?node}")/console.log"; }
 cmd_verify() { need_python; "$PY" "$LAB_DIR/tools/verify.py" "$@"; }   # control plane + data plane, end to end
+cmd_chaos() { need_python; "$PY" "$LAB_DIR/tools/chaos.py" "$@"; }   # a component fails under load (tools/chaos.py)
+cmd_db() { need_python; "$PY" "$LAB_DIR/tools/dbctl.py" "$@"; }       # status | promote | reseed | switchover
+cmd_test() { need_python; exec "$LAB_DIR/tests/run.sh" "$@"; }       # the Robot Framework suites (results/<timestamp>/)
 cmd_services() { need_python; "$PY" "$LAB_DIR/tools/services.py" "$@"; }   # the application: db, app, web, lb (tools/services.py)
 cmd_fw-failover() { need_python; "$PY" "$LAB_DIR/tools/fw_failover.py" "$@"; }   # power fw1 off under a live connection, then back
 cmd_check-wiring() { need_python; "$PY" "$LAB_DIR/tools/check_wiring.py"; }   # every link reaches the peer lab.conf says
@@ -329,6 +335,9 @@ usage: $(basename "$0") <command> [node...]
   check-wiring       prove every link reaches the peer port lab.conf names (by MAC; bond legs by LACP partner)
   verify [--quick]   fabric, firewall sessions and preference, data plane, the firewall policy matrix (--quick: no matrix)
   services [--reseed] [node..]  deploy the application: PostgreSQL primary + replica, app, nginx, HAProxy + keepalived
+  chaos <scenario>   under load from wan: lb | web | app | db | leaf | border | fw | all — fail it, restore, count losses
+  db [status|promote N|reseed N FROM|switchover N]   PostgreSQL roles
+  test [robot args]  the Robot suites (~35 min); --exclude disruptive: the read-only ones (~3 min)
   fw-failover        one TCP connection web1 -> app1 while fw1 is powered off and back: gaps, survival
   rebuild [node..]   re-generate domain XML / Linux seeds (keeps disks)
   clean [node..]     stop, undefine and delete overlay disks
@@ -338,6 +347,6 @@ U
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services) "cmd_$cmd" "$@" ;;
+  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services|chaos|db|test) "cmd_$cmd" "$@" ;;
   *) usage; exit 1 ;;
 esac
