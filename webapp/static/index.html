@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>try { const t = localStorage.getItem('portal-theme'); document.documentElement.dataset.theme = t ? t : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) { }</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>evpn-3tier portal</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='6' rx='2' fill='%232563eb'/%3E%3Crect x='4' y='13' width='24' height='6' rx='2' fill='%2316a34a'/%3E%3Crect x='4' y='22' width='24' height='6' rx='2' fill='%23d97706'/%3E%3C/svg%3E">
+<style>
+:root { --bg:#f6f7f9; --panel:#fcfcfb; --ink:#1f2937; --mute:#52514e; --line:#e5e7eb; --edge:#cbd5e1; --grid:#ecebe7;
+  --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --accent:#2563eb; --code:#f3f4f6; --off:#a8a29e;
+  --web:#2563eb; --app:#16a34a; --db:#d97706; --out:#7c3aed; --wire:#94a3b8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0f141b; --panel:#1a1a19; --ink:#f0efec; --mute:#c3c2b7;
+  --line:#2c2c2a; --edge:#3f3f3c; --grid:#2a2a28; --ok:#22c55e; --warn:#f59e0b; --bad:#f87171; --accent:#60a5fa; --code:#121211; --off:#57534e;
+  --web:#60a5fa; --app:#4ade80; --db:#fbbf24; --out:#a78bfa; --wire:#57534e; } }
+:root[data-theme="dark"] { --bg:#0f141b; --panel:#1a1a19; --ink:#f0efec; --mute:#c3c2b7; --line:#2c2c2a; --edge:#3f3f3c; --grid:#2a2a28;
+  --ok:#22c55e; --warn:#f59e0b; --bad:#f87171; --accent:#60a5fa; --code:#121211; --off:#57534e; --web:#60a5fa; --app:#4ade80; --db:#fbbf24; --out:#a78bfa; --wire:#57534e; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+header h1 { font-size:16px; margin:0; } header .sub { color:var(--mute); } header .right { margin-left:auto; color:var(--mute); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+a { color:var(--accent); }
+main { display:grid; grid-template-columns: minmax(0, 1fr) 420px; gap:16px; padding:16px; max-width:1500px; margin:0 auto; }
+@media (max-width: 1150px) { main { grid-template-columns: minmax(0, 1fr); } }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
+.card h2 { font-size:14px; margin:0 0 10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; } .card h2 .end { margin-left:auto; font-weight:400; }
+.stack > * + * { margin-top:16px; }
+.pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--mute); white-space:nowrap; }
+.pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.warn { color:var(--warn); border-color:var(--warn); } .pill.accent { color:var(--accent); border-color:var(--accent); }
+.mute { color:var(--mute); } .small { font-size:12px; } .bad { color:var(--bad); } .okc { color:var(--ok); }
+table { border-collapse:collapse; width:100%; font-size:13px; } th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--mute); font-weight:500; } td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; white-space:nowrap; }
+.wrap { overflow-x:auto; }
+pre { background:var(--code); border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:340px; font-size:12px; margin:8px 0 0; white-space:pre-wrap; word-break:break-word; }
+button, select { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--edge); border-radius:6px; padding:5px 10px; }
+button { cursor:pointer; } button.primary { background:var(--accent); border-color:var(--accent); color:#fff; } button:disabled { opacity:.5; cursor:default; }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.steps { list-style:none; padding:0; margin:6px 0 0; } .steps li { padding:2px 0; } .steps .st { display:inline-block; width:62px; }
+.st.success { color:var(--ok); } .st.failed { color:var(--bad); } .st.running { color:var(--accent); } .st.pending, .st.skipped, .st.queued { color:var(--mute); }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+/* the request path */
+.path { display:flex; align-items:stretch; gap:0; overflow-x:auto; padding-bottom:4px; }
+.hop { flex:1 0 110px; border:1px solid var(--edge); border-radius:8px; padding:8px 10px; background:var(--bg); min-width:110px; }
+.hop b { display:block; font-size:11px; color:var(--mute); font-weight:500; text-transform:uppercase; letter-spacing:.04em; }
+.hop span { font:600 14px ui-monospace, monospace; } .hop small { display:block; color:var(--mute); font-size:11px; }
+.hop.fw { border-style:dashed; flex-basis:80px; min-width:80px; } .hop.bad { border-color:var(--bad); }
+.arrow { flex:0 0 18px; display:flex; align-items:center; justify-content:center; color:var(--mute); }
+.tier-web { border-top:3px solid var(--web); } .tier-app { border-top:3px solid var(--app); } .tier-db { border-top:3px solid var(--db); } .tier-out { border-top:3px solid var(--out); }
+/* topology */
+svg { display:block; width:100%; height:auto; }
+svg text { fill:var(--ink); font-size:11px; } svg .sm { fill:var(--mute); font-size:10px; }
+svg .box { fill:var(--panel); stroke:var(--edge); stroke-width:1.5; } svg .box.up { stroke:var(--ok); } svg .box.down { stroke:var(--off); stroke-dasharray:4 3; } svg .box.err { stroke:var(--bad); stroke-width:2; }
+svg .box.hold { fill:color-mix(in srgb, var(--ok) 14%, var(--panel)); }
+svg .wire { stroke:var(--wire); stroke-width:1.2; fill:none; } svg .wire.es { stroke-dasharray:3 2; }
+.legend { display:flex; gap:14px; flex-wrap:wrap; color:var(--mute); font-size:12px; margin-top:6px; }
+.dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+.grid2 { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:16px; } @media (max-width: 800px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>evpn-3tier</h1><span class="sub" id="sub">a three-tier application on an EVPN fabric</span>
+  <span class="right">
+    <a href="/shop/" target="_blank" rel="noopener">Order Desk</a>
+    <a href="/haproxy/lb1/" target="_blank" rel="noopener">HAProxy lb1</a>
+    <a href="/haproxy/lb2/" target="_blank" rel="noopener">lb2</a>
+    <a href="/docs" target="_blank" rel="noopener">API</a>
+    <a id="hub" href="#">Lab Hub</a>
+    <button id="theme" title="light / dark">◐</button>
+  </span>
+</header>
+<main>
+  <div class="stack">
+    <section class="card">
+      <h2>A request, right now <span class="end small mute" id="pathage"></span></h2>
+      <div class="path" id="path"></div>
+      <p class="small mute" style="margin:8px 0 0">The portal asks <code>/api/info</code> every 5 s from wan's test clients (198.51.100.1): through the active firewall to the web VIP, HAProxy, nginx, across the firewall to an app server, across it again to the PostgreSQL primary. Each tier is its own VRF; the firewalls are the only way between them.</p>
+    </section>
+    <section class="card">
+      <h2>Topology <span class="end small mute" id="vms"></span></h2>
+      <div class="wrap"><svg id="topo" viewBox="0 0 1010 430" role="img" aria-label="topology"></svg></div>
+      <div class="legend"><span><i class="dot" style="background:var(--ok)"></i>running, answering</span><span><i class="dot" style="background:var(--bad)"></i>running, something down (sessions, bonds, service)</span><span><i class="dot" style="background:var(--off)"></i>off</span><span>green fill: holds the VIP / is the active firewall / is the primary</span><span>dashed: an LACP bond leg (EVPN multihoming)</span></div>
+    </section>
+    <div class="grid2">
+      <section class="card"><h2>Load balancers and web tier</h2><div class="wrap"><table id="lbt"></table></div><div class="wrap" style="margin-top:10px"><table id="tiers"></table></div></section>
+      <section class="card"><h2>Firewalls <span class="end small mute">fw1 preferred · fw2 prepends</span></h2><div class="wrap"><table id="fwt"></table></div>
+        <h2 style="margin-top:14px">Policy <span class="end small mute">lab.conf FW_POLICY</span></h2><div class="wrap"><table id="pol"></table></div>
+        <p class="small mute" style="margin:6px 0 0">Replies always pass; anything else between VRFs is dropped and logged.</p></section>
+    </div>
+    <section class="card"><h2>Fabric <span class="end small mute">BGP sessions established · segment bonds up</span></h2><div class="wrap"><table id="fab"></table></div></section>
+  </div>
+  <div class="stack">
+    <section class="card">
+      <h2>Runs <span class="end small mute">one at a time; others queue</span></h2>
+      <div class="row"><button class="primary" data-run="verify">Verify</button><button data-run="verify" data-quick="1">Verify (no policy matrix)</button></div>
+      <div class="row" style="margin-top:8px"><select id="scen"></select><button class="primary" data-run="chaos">Fail it under load</button></div>
+      <div class="row" style="margin-top:8px"><button data-run="fw_failover">Live connection through fw1 failover</button></div>
+      <div class="row" style="margin-top:8px"><button data-run="test" data-quick="1">Tests: read-only (~3 min)</button><button data-run="test">Tests: all (~35 min)</button></div>
+      <div class="row" style="margin-top:8px"><select id="suite"></select><button data-run="test" data-suite="1">Run suite</button><button data-run="services" title="lab.sh services">Redeploy the app</button></div>
+      <div id="err" class="bad small" style="margin-top:6px"></div>
+    </section>
+    <section class="card" id="runcard" hidden>
+      <h2><span id="runtitle"></span> <span class="end" id="runstatus"></span></h2>
+      <ul class="steps" id="runsteps"></ul>
+      <div id="runresult"></div>
+      <pre id="runlog"></pre>
+    </section>
+    <section class="card"><h2>Recent runs</h2><div class="wrap"><table id="runs"></table></div></section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+async function api(p) { const r = await fetch(p, {cache: 'no-store'}); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText); return r.json(); }
+async function post(p, b) { const r = await fetch(p, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)}); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.detail || r.statusText); return j; }
+const ago = (t) => { const s = Math.round(Date.now() / 1000 - t); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : new Date(t * 1000).toLocaleString(); };
+$('hub').href = `${location.protocol}//${location.hostname}:8088/`;
+$('theme').onclick = () => { const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; try { localStorage.setItem('portal-theme', t); } catch (e) {} };
+let LAB = null, S = null;
+
+// ---- the request path -----------------------------------------------------------------------------------------------
+function hop(label, val, sub, cls) { return `<div class="hop ${cls || ''}"><b>${label}</b><span>${esc(val ?? '—')}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`; }
+const ar = '<div class="arrow">→</div>';
+function drawPath() {
+  const p = S.path, fw = S.active_fw || '?', ok = p && p.ok;
+  const dbn = p && p.db ? (LAB.nodes.find((n) => n.addr === p.db) || {}).name : null;
+  $('path').innerHTML = [hop('client', '198.51.100.1', 'wan', 'tier-out'), hop('firewall', fw, 'outside → web', 'fw'), hop('VIP', p && p.lb, LAB.web_vip, 'tier-web' + (ok ? '' : ' bad')),
+    hop('web', p && p.web, 'nginx', 'tier-web'), hop('firewall', fw, 'web → app :8080', 'fw'), hop('app', p && p.app, 'e3t-app', 'tier-app'),
+    hop('firewall', fw, 'app → db :5432', 'fw'), hop('database', dbn || (p && p.db), p && p.db_role, 'tier-db')].join(ar);
+  $('pathage').innerHTML = p ? (ok ? `<span class="pill ok">ok</span> ${p.ms_total} ms · ${p.orders ?? '?'} orders · ${ago(S.at)}` : `<span class="pill bad">failed</span> ${esc(p.error || p.code)} · ${ago(S.at)}`) : 'no sample yet';
+}
+
+// ---- topology -----------------------------------------------------------------------------------------------------------
+const POS = {};
+function layout() {
+  const row = (names, y, x0, dx) => names.forEach((n, i) => POS[n] = [x0 + i * dx, y]);
+  const by = (r) => LAB.nodes.filter((n) => n.role === r).map((n) => n.name);
+  row(by('spine'), 30, 280, 340);
+  row(by('leaf'), 150, 20, 140); row(by('border'), 150, 690, 150);
+  const r1 = ['web1', 'app1', 'db1'], r2 = ['web2', 'app2', 'db2'];
+  row(r1, 290, 10, 108); row(r2, 290, 345, 108);
+  row(by('fw'), 290, 690, 110); row(by('lb'), 380, 690, 110); POS.wan = [900, 290];
+}
+function topo() {
+  if (!Object.keys(POS).length) layout();
+  const W = 104, H = 34, c = (n) => [POS[n][0] + W / 2, POS[n][1] + H / 2];
+  let w = '';
+  for (const l of LAB.links) {
+    if (!POS[l.a] || !POS[l.b]) continue;
+    const [x1, y1] = c(l.a), [x2, y2] = c(l.b);
+    w += `<line class="wire ${l.kind === 'access' ? 'es' : ''}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+  }
+  let b = '';
+  for (const n of LAB.nodes) {
+    if (!POS[n.name]) continue;
+    const s = S.nodes[n.name] || {}, [x, y] = POS[n.name];
+    const sick = s.ok === false || s.service_up === false || s.db_role === 'down' || (s.bgp_total !== undefined && s.bgp_up < s.bgp_total) || (s.bonds !== undefined && s.bonds_up < s.bonds) || (n.role === 'lb' && s.haproxy === false);
+    const cls = !s.running ? 'down' : (sick ? 'err' : 'up');
+    const hold = (n.role === 'lb' && s.vip) || (n.role === 'fw' && S.active_fw === n.name) || (n.role === 'db' && s.db_role === 'primary');
+    let sub = n.role;
+    if (s.running && s.ok) {
+      if (s.bgp_total !== undefined) sub = `BGP ${s.bgp_up}/${s.bgp_total}` + (s.bonds !== undefined ? ` · ES ${s.bonds_up}/${s.bonds}` : '');
+      if (n.role === 'lb') sub = s.vip ? 'VIP' : (s.keepalived ? 'standby' : 'keepalived down');
+      if (n.role === 'db') sub = s.db_role;
+      if (['web', 'app'].includes(n.role)) sub = (s.service_up ? s.service : s.service + ' DOWN') + ` · ${s.legs} legs`;
+    } else if (!s.running) sub = 'off';
+    b += `<g><title>${esc(n.name)} ${esc(n.mgmt_ip)}</title><rect class="box ${cls} ${hold ? 'hold' : ''}" x="${x}" y="${y}" width="${W}" height="${H}" rx="6"/>` +
+         `<text x="${x + 8}" y="${y + 14}">${esc(n.name)}</text><text class="sm" x="${x + 8}" y="${y + 27}">${esc(sub)}</text></g>`;
+  }
+  $('topo').innerHTML = w + b;
+  const run = Object.values(S.nodes).filter((x) => x.running).length;
+  $('vms').textContent = `${run} of ${LAB.nodes.length} VMs running`;
+}
+
+// ---- tables ---------------------------------------------------------------------------------------------------------------
+const pill = (ok, t, f) => `<span class="pill ${ok ? 'ok' : 'bad'}">${esc(ok ? t : f)}</span>`;
+function tables() {
+  const N = S.nodes;
+  const lbs = LAB.nodes.filter((n) => n.role === 'lb');
+  $('lbt').innerHTML = '<tr><th>lb</th><th>VIP</th><th>HAProxy</th><th>web servers (HAProxy says)</th></tr>' + lbs.map((n) => { const s = N[n.name] || {};
+    if (!s.running) return `<tr><td>${n.name}</td><td colspan="3" class="mute">off</td></tr>`;
+    const be = Object.entries(s.backends || {}).map(([k, v]) => `${k} <span class="${v.status === 'UP' ? 'okc' : 'bad'}">${esc(v.status)}</span>`).join(', ');
+    return `<tr><td>${n.name}</td><td>${s.vip ? '<span class="pill ok">holds it</span>' : '<span class="pill">standby</span>'}</td><td>${pill(s.haproxy, 'up', 'down')}</td><td class="small">${be || '—'}</td></tr>`; }).join('');
+  const srv = LAB.nodes.filter((n) => ['web', 'app', 'db'].includes(n.role));
+  $('tiers').innerHTML = '<tr><th>server</th><th>rack</th><th>service</th><th>bond legs</th><th></th></tr>' + srv.map((n) => { const s = N[n.name] || {};
+    if (!s.running) return `<tr><td>${n.name}</td><td>${n.rack}</td><td colspan="3" class="mute">off</td></tr>`;
+    return `<tr><td>${n.name}</td><td>${n.rack}</td><td>${pill(s.service_up, s.service, s.service + ' down')}</td><td>${s.legs === 2 ? '<span class="okc">2</span>' : `<span class="bad">${s.legs ?? '?'}</span>`}</td><td>${n.role === 'db' ? `<span class="pill ${s.db_role === 'primary' ? 'ok' : s.db_role === 'standby' ? 'accent' : 'bad'}">${esc(s.db_role)}</span>` : ''}</td></tr>`; }).join('');
+  const fws = LAB.nodes.filter((n) => n.role === 'fw');
+  $('fwt').innerHTML = '<tr><th>fw</th><th>carries traffic</th><th>VRRP (sync)</th><th class="num">conntrack</th><th class="num">BGP</th></tr>' + fws.map((n) => { const s = N[n.name] || {};
+    if (!s.running) return `<tr><td>${n.name}</td><td colspan="4" class="mute">off</td></tr>`;
+    return `<tr><td>${n.name}</td><td>${S.active_fw === n.name ? '<span class="pill ok">active</span>' : '<span class="pill">standby</span>'}</td><td>${esc(s.vrrp)}</td><td class="num">${s.conntrack ?? '?'}</td><td class="num">${s.bgp_up}/${s.bgp_total}</td></tr>`; }).join('');
+  const sw = LAB.nodes.filter((n) => ['spine', 'leaf', 'border'].includes(n.role));
+  $('fab').innerHTML = '<tr><th>node</th><th>role</th><th>AS</th><th>loopback</th><th class="num">BGP up</th><th class="num">segment bonds</th></tr>' + sw.map((n) => { const s = N[n.name] || {};
+    const b = !s.running ? '<span class="mute">off</span>' : `<span class="${s.bgp_up === s.bgp_total ? 'okc' : 'bad'}">${s.bgp_up ?? '?'}/${s.bgp_total ?? '?'}</span>`;
+    const e = s.bonds === undefined ? '' : `<span class="${s.bonds_up === s.bonds ? 'okc' : 'bad'}">${s.bonds_up}/${s.bonds}</span>`;
+    return `<tr><td>${n.name}</td><td>${n.role}</td><td>${n.asn ?? ''}</td><td class="mono">${n.loopback ?? ''}</td><td class="num">${b}</td><td class="num">${e}</td></tr>`; }).join('');
+}
+function policy() {
+  $('pol').innerHTML = '<tr><th>from</th><th>to</th><th>what</th></tr>' + LAB.policy.map((p) => `<tr><td>${p.from}</td><td>${p.to}</td><td class="mono">${esc(p.dest)} ${p.proto}${p.port ? ' ' + p.port : ''}</td></tr>`).join('');
+}
+
+// ---- runs ------------------------------------------------------------------------------------------------------------------
+let RUN = null, since = 0, timer = null;
+document.querySelectorAll('[data-run]').forEach((b) => b.onclick = async () => {
+  const mode = b.dataset.run, options = {};
+  if (b.dataset.quick) options.quick = true;
+  if (mode === 'chaos') options.scenario = $('scen').value;
+  if (b.dataset.suite) options.suite = $('suite').value;
+  if (mode === 'chaos' || (mode === 'test' && !options.quick) || mode === 'fw_failover') { if (!confirm('This powers lab nodes off and back on. Go?')) return; }
+  $('err').textContent = '';
+  try { const r = await post('/api/runs', {mode, options}); openRun(r.id); runs(); } catch (e) { $('err').textContent = e.message; }
+});
+function openRun(id) { RUN = {id}; since = 0; $('runlog').textContent = ''; $('runresult').innerHTML = ''; $('runcard').hidden = false; clearTimeout(timer); poll(); }
+async function poll() {
+  const d = await api(`/api/runs/${encodeURIComponent(RUN.id)}?since=${since}`).catch(() => null);
+  if (d) {
+    $('runtitle').textContent = `${d.mode} · ${d.id}`;
+    $('runstatus').innerHTML = `<span class="pill ${d.status === 'success' ? 'ok' : d.status === 'failed' ? 'bad' : 'accent'}">${esc(d.status)}${d.queue_position ? ' #' + d.queue_position : ''}</span>`;
+    $('runsteps').innerHTML = d.steps.map((s) => `<li><span class="st ${s.status}">${s.status}</span> ${esc(s.title)}${s.summary ? ` <span class="mute small">— ${esc(s.summary)}</span>` : ''}</li>`).join('');
+    const lines = (d.log || []).map((l) => l.line); since += lines.length;
+    const show = lines.filter((l) => !l.startsWith('RESULT '));
+    if (show.length) { const pre = $('runlog'); const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20; pre.textContent += show.join('\n') + '\n'; if (atEnd) pre.scrollTop = pre.scrollHeight; }
+    const res = lines.find((l) => l.startsWith('RESULT ')); if (res) chaosTable(JSON.parse(res.slice(7)));
+    if (d.tests) $('runresult').innerHTML = `<p class="small">${d.tests.passed}/${d.tests.total} tests passed${d.results_dir ? ` · results/${esc(d.results_dir)}/` : ''}</p>`;
+    if (['queued', 'running'].includes(d.status)) { timer = setTimeout(poll, 1500); return; }
+    runs();
+  }
+}
+function chaosTable(r) {
+  $('runresult').innerHTML = `<table><tr><th>phase</th><th class="num">s</th><th class="num">reads failed</th><th class="num">gap</th><th class="num">writes failed</th><th class="num">gap</th></tr>` +
+    r.phases.map((p) => `<tr><td>${p.phase}</td><td class="num">${p.seconds}</td><td class="num ${p.read.failed ? 'bad' : ''}">${p.read.failed}/${p.read.requests}</td><td class="num">${p.read.longest_gap_s} s</td><td class="num ${p.write.failed ? 'bad' : ''}">${p.write.failed}/${p.write.requests}</td><td class="num">${p.write.longest_gap_s} s</td></tr>`).join('') + '</table>';
+}
+async function runs() {
+  const rs = await api('/api/runs').catch(() => []);
+  $('runs').innerHTML = '<tr><th>run</th><th>status</th><th>started</th></tr>' + rs.slice(0, 15).map((r) => `<tr><td><a href="#" data-id="${esc(r.id)}">${esc(r.mode)}${r.options && r.options.scenario ? ' ' + esc(r.options.scenario) : ''}${r.options && r.options.suite ? ' ' + esc(r.options.suite) : ''}</a>${r.steps && r.steps[0] && r.steps[0].summary ? `<div class="small mute">${esc(r.steps[0].summary)}</div>` : ''}</td><td><span class="st ${r.status}">${esc(r.status)}</span></td><td class="small mute">${ago(r.started)}</td></tr>`).join('');
+  $('runs').querySelectorAll('a[data-id]').forEach((a) => a.onclick = (e) => { e.preventDefault(); openRun(a.dataset.id); });
+  const live = rs.find((r) => ['running', 'queued'].includes(r.status)); if (live && !RUN) openRun(live.id);
+}
+
+// ---- refresh ---------------------------------------------------------------------------------------------------------------
+async function refresh() {
+  try {
+    S = await api('/api/state');
+    if (S.at) { drawPath(); topo(); tables(); }
+    else $('pathage').textContent = 'the sampler is taking its first look (about 10 s) ...';
+  } catch (e) { $('pathage').textContent = 'no state: ' + e.message; }
+}
+(async () => {
+  LAB = await api('/api/lab');
+  $('sub').textContent = `v${LAB.version} · a three-tier application on an EVPN fabric · VIP ${LAB.web_vip}`;
+  $('scen').innerHTML = Object.entries(LAB.scenarios).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  $('suite').innerHTML = LAB.suites.map((s) => `<option>${esc(s)}</option>`).join('');
+  policy(); refresh(); runs(); setInterval(refresh, 3000); setInterval(runs, 10000);
+})();
+</script>
+</body>
+</html>

@@ -57,8 +57,29 @@ shell command on any node.
 2. Firewall policy (zones, per-tier rules), conntrack-sync, fw failover — **done (0.2.0)**
 3. HAProxy + keepalived (web VIP), nginx, the app tier, PostgreSQL primary + replica — **done (0.3.0)**
 4. Failure tests and the Robot suite — **done (0.4.0)**
-5. Portal (8119), Lab Hub, NMS
+5. Portal (8119), Lab Hub, NMS — **done (0.5.0)**
 6. Optional: L4 load-balancing experiments
+
+## The portal, the Lab Hub, the NMS
+
+**Portal:** http://192.168.50.231:8119 (sign in at the Lab Hub; user unit `evpn-3tier-webapp`, `./lab.sh webapp`).
+- *A request, right now*: every 5 s the portal sends one request through the whole application from wan's clients and
+  shows which firewall, load balancer, web, app and database server it took.
+- The topology, live (BGP sessions, Ethernet Segment bonds, services, the VIP holder, the active firewall, the primary),
+  the load balancers and HAProxy's view of the web tier, the firewalls (VRRP, conntrack) and the policy, the fabric.
+- Runs (one at a time, streamed, kept in webapp/runs/): verify, a failure scenario under load (with its per-phase
+  table), the live connection through a firewall failover, the Robot suites (read-only, all, one), redeploying the app.
+- **/shop/** is the Order Desk itself: the portal relays it through wan, which forwards from the test clients' address
+  (198.51.100.1) through the firewall to the VIP — the host has no route into the tier VRFs. /haproxy/lb1/ and
+  /haproxy/lb2/ are HAProxy's stats pages. /docs is the API.
+
+**Lab Hub:** listed as `evpn-3tier` (19 VMs, 13.5 GiB): power, the last Robot run (results/latest), links to the portal,
+the Order Desk, Grafana and GitHub.
+
+**NMS** (lab-portal 0.53.0): Prometheus job `evpn-3tier` scrapes the portal's /metrics (SD /api/sd); alert group
+`evpn-3tier` (the application down, nodes, BGP, multihoming legs, services, the active firewall, the database primary and
+standby, failed tests — all quiet while a portal run goes); Grafana **evpn-3tier: overview**
+(http://192.168.50.231:3001/d/evpn-3tier-overview).
 
 ## The application
 
@@ -80,10 +101,8 @@ client ─443─► VIP 172.16.10.10 (keepalived: lb1, else lb2) ─► HAProxy 
 - **db1 / db2:** PostgreSQL 17, database `shop`; `app` may connect only from the app VLAN, `replicator` only from the
   db VLAN. No VIP, no load balancer: the app's connection string finds the primary.
 
-**See it in a browser.** The host has no route into the tier VRFs (only the OOB network). Tunnel through wan, whose
-traffic enters as "outside" like any client: `ssh -L 8443:172.16.10.10:443 vyos@10.18.0.45` (password vyos), then
-https://localhost:8443/ (accept the lab certificate). From the command line, on wan:
-`curl -sk --interface 198.51.100.1 https://172.16.10.10/api/info`.
+**See it in a browser:** http://192.168.50.231:8119/shop/ (the portal's relay through wan). From the command line, on
+wan: `curl -sk --interface 198.51.100.1 https://172.16.10.10/api/info`.
 
 ## The firewalls
 
@@ -136,6 +155,10 @@ The Robot suites (tests/suites/01-09) assert these with some room; 06-09 are tag
   haproxy, nginx, postgresql and the app (from `local`, which runs last, keepalived exited for good).
 - **Load measurements:** a request still in flight when the failure starts belongs to the failure (the baseline ends
   5.5 s before the injection), and the loader's clock (wan's) is offset against the host's.
+- **OpenRC can remember a crashed PostgreSQL:** `rc-service postgresql start` then says "already started" and does
+  nothing; re-seeding a replica (tools/dbctl.py) zaps the state and stops any leftover postmaster first. And
+  `pg_basebackup -R` appends a `primary_conninfo` to the copied postgresql.auto.conf, which already holds the source's:
+  dbctl keeps exactly one.
 - **BusyBox `pgrep -x haproxy` never matches** (keepalived's check failed, both load balancers sat in FAULT): `pidof`.
 - **nginx -t needs /run/nginx,** which only the init script creates; **`$$` in SQL** does not survive two shells — the
   roles are created from a file.

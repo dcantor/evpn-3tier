@@ -1,0 +1,12 @@
+[Unit]
+Description=evpn-3tier - three-tier application on an EVPN fabric, lab portal (http://0.0.0.0:8119)
+After=network-online.target libvirtd.service
+
+[Service]
+WorkingDirectory=/home/dcantor/evpn-3tier
+ExecStart=/home/dcantor/evpn-3tier/lab.sh webapp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

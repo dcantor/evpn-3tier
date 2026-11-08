@@ -7,7 +7,7 @@
   dbctl.py switchover NODE         planned: stop the current primary cleanly (its WAL reaches the standbys), promote
                                    NODE, re-seed the old primary as NODE's replica
 The app needs nothing: its connection string lists every db node with target_session_attrs=read-write."""
-import sys, time
+import shlex, sys, time
 from labssh import inventory, run
 
 inv = inventory(); N = {n["name"]: n for n in inv["nodes"]}
@@ -24,7 +24,7 @@ def pg(node, sql, timeout=30):
 
 
 def sh(node, cmd, timeout=300):
-    rc, out = run(node, f"doas sh -c '{cmd}' 2>&1", timeout=timeout, inv=inv)
+    rc, out = run(node, f"doas sh -c {shlex.quote(cmd)} 2>&1", timeout=timeout, inv=inv)
     if rc: raise RuntimeError(f"{node}: {cmd[:90]}: rc={rc}: {out[-500:]}")
     return out
 
@@ -64,16 +64,27 @@ def promote(node):
     raise RuntimeError(f"{node} did not become primary")
 
 
+START = ("rc-service postgresql stop >/dev/null 2>&1; rc-service postgresql zap >/dev/null 2>&1; "   # OpenRC can hold a stale
+         f"su postgres -s /bin/sh -c \"pg_ctl stop -D {PGDATA} -m fast\" >/dev/null 2>&1; "              # 'crashed': start is a no-op
+         "rc-update add postgresql default >/dev/null 2>&1; rc-service postgresql start >/dev/null")
+
+
 def reseed(node, src):
     """NODE becomes a fresh replica of SRC; PostgreSQL enabled at boot again."""
-    sh(node, f"rc-service postgresql stop >/dev/null 2>&1; rm -rf {PGDATA}; mkdir -p /var/lib/postgresql/17 && chown -R postgres:postgres /var/lib/postgresql && "
+    sh(node, f"rc-service postgresql stop >/dev/null 2>&1; rc-service postgresql zap >/dev/null 2>&1; "
+             f"su postgres -s /bin/sh -c \"pg_ctl stop -D {PGDATA} -m fast\" >/dev/null 2>&1; rm -rf {PGDATA}; "
+             f"mkdir -p /var/lib/postgresql/17 && chown -R postgres:postgres /var/lib/postgresql && "
              f"su postgres -s /bin/sh -c \"PGPASSWORD=replicator pg_basebackup -h {ip(N[src])} -U replicator -D {PGDATA} -R -X stream -c fast\"", timeout=600)
-    # the conf.d include and pg_hba come with the copy (they live in the data directory)
-    sh(node, "chown -R postgres:postgres /var/lib/postgresql; rc-update add postgresql default >/dev/null 2>&1; rc-service postgresql start >/dev/null")
+    # -R appends primary_conninfo to the copied postgresql.auto.conf, which already holds the source's earlier ones: keep one
+    sh(node, f"grep -v '^primary_conninfo' {PGDATA}/postgresql.auto.conf > /tmp/auto.conf; "
+             f"echo \"primary_conninfo = 'user=replicator password=replicator host={ip(N[src])} port=5432 application_name={node}'\" >> /tmp/auto.conf; "
+             f"mv /tmp/auto.conf {PGDATA}/postgresql.auto.conf; chown -R postgres:postgres /var/lib/postgresql")
+    sh(node, START)
     for _ in range(30):
         if role(node) == "standby": return
         time.sleep(1)
-    raise RuntimeError(f"{node} is not streaming from {src}")
+    _, log = run(node, "doas tail -8 /var/log/postgresql/postmaster.log", inv=inv)
+    raise RuntimeError(f"{node} is not streaming from {src}; its log:\n{log}")
 
 
 def switchover(node):

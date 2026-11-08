@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+httpx
+paramiko>=3
+labportal @ git+https://github.com/dcantor/lab-portal

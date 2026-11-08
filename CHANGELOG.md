@@ -2,6 +2,26 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-11-08
+
+### Added
+- Phase 5: the portal (webapp/, :8119, user unit evpn-3tier-webapp, `./lab.sh webapp`): the request path right now, the
+  live topology, load balancers, firewalls and policy, the fabric; runs (verify, failure scenarios with per-phase tables,
+  the firewall failover, Robot suites, redeploy); /shop/ (the Order Desk relayed through wan), /haproxy/<lb>/ (stats),
+  /metrics and /api/sd for the NMS.
+- wan relays its OOB address :8443 to the web VIP from the test clients' address (tools/vyos_files.py): how the portal
+  reaches the application.
+- The Lab Hub lists the lab (labs.json); the NMS scrapes it (lab-portal 0.53.0: job, 9 alert rules, Grafana dashboard).
+
+### Changed
+- The Order Desk page uses relative API paths (it works at / on the VIP and under /shop/ on the portal).
+
+### Fixed
+- dbctl reseed: OpenRC's stale "crashed" state made `rc-service postgresql start` a no-op, so a re-seeded replica never
+  started (the full Robot run's database failover failed on it); it now zaps the state and stops any leftover
+  postmaster, keeps one primary_conninfo, and shows PostgreSQL's log when the replica does not stream. Commands to the
+  db nodes are quoted with shlex.
+
 ## [0.4.0] - 2026-11-08
 
 ### Added

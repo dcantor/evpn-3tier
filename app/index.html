@@ -35,11 +35,12 @@
   <div class="wrap"><table><thead><tr><th>#</th><th>item</th><th>qty</th><th>web</th><th>app</th><th>db</th><th>when</th></tr></thead><tbody id="rows"></tbody></table></div>
 </main>
 <script>
+// relative API paths: the page works at / on the VIP and under /shop/ on the lab portal (its relay through wan)
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 async function info() {
   try {
-    const r = await fetch("/api/info", {cache: "no-store"}); const j = await r.json();
+    const r = await fetch("api/info", {cache: "no-store"}); const j = await r.json();
     const hops = [["client", j.client], ["load balancer", j.lb], ["web", j.web], ["app", j.app], ["database", j.db ? `${j.db} (${j.db_role})` : "—"]];
     $("chain").innerHTML = hops.map(([k, v]) => `<div class="hop"><b>${k}</b><span>${esc(v || "—")}</span></div>`).join("");
     $("err").textContent = j.error || "";
@@ -47,14 +48,14 @@ async function info() {
 }
 async function orders() {
   try {
-    const rows = await (await fetch("/api/orders", {cache: "no-store"})).json();
+    const rows = await (await fetch("api/orders", {cache: "no-store"})).json();
     if (!Array.isArray(rows)) return;
     $("rows").innerHTML = rows.map((o) => `<tr><td>${o.id}</td><td>${esc(o.item)}</td><td>${o.qty}</td><td class="m">${esc(o.web)}</td><td class="m">${esc(o.app)}</td><td class="m">${esc(o.db)}</td><td>${esc(String(o.created).slice(11, 19))}</td></tr>`).join("");
   } catch (e) {}
 }
 $("f").addEventListener("submit", async (ev) => {
   ev.preventDefault(); const f = new FormData(ev.target);
-  const r = await fetch("/api/orders", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({item: f.get("item"), qty: Number(f.get("qty"))})});
+  const r = await fetch("api/orders", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({item: f.get("item"), qty: Number(f.get("qty"))})});
   const j = await r.json(); $("err").textContent = r.ok ? "" : (j.error || r.status); if (r.ok) ev.target.reset(); orders(); info();
 });
 info(); orders(); setInterval(info, 2000); setInterval(orders, 5000);

@@ -17,3 +17,5 @@ images/.builder/
 images/build.log
 nodes/.lb-cert/
 results-run.log
+webapp/.venv/
+webapp/runs/

@@ -248,9 +248,50 @@ exit 0
 """
 
 
+SHOP_RELAY = "/config/scripts/evpn-3tier-shop-relay"
+SHOP_RELAY_PY = r"""#!/usr/bin/env python3
+# evpn-3tier (tools/vyos_files.py): the portal's way to the application. The host has no route into the tier VRFs, so
+# wan relays TCP from its OOB address @LISTEN@ to the web VIP @VIP@:443, from the test clients' address @SRC@ — the
+# request enters the data centre like any internet client's: through the firewall (outside -> web 443) to HAProxy.
+import asyncio, os, socket, syslog
+if os.geteuid() != 0: os.execvp("sudo", ["sudo", __file__])
+syslog.openlog("evpn-3tier-shop-relay")
+
+async def pipe(r, w):
+    try:
+        while (d := await r.read(65536)): w.write(d); await w.drain()
+    except Exception: pass
+    finally:
+        try: w.close()
+        except Exception: pass
+
+async def handle(cr, cw):
+    try:
+        s = socket.socket(); s.setblocking(False); s.bind(("@SRC@", 0))
+        await asyncio.wait_for(asyncio.get_running_loop().sock_connect(s, ("@VIP@", 443)), 5)
+        ur, uw = await asyncio.open_connection(sock=s)
+    except Exception as e:
+        syslog.syslog(f"to @VIP@:443: {e}"); cw.close(); return
+    await asyncio.gather(pipe(cr, uw), pipe(ur, cw))
+
+async def main():
+    srv = await asyncio.start_server(handle, "@LISTEN_IP@", @LISTEN_PORT@, reuse_address=True)
+    syslog.syslog("relaying @LISTEN@ -> @VIP@:443 from @SRC@"); await srv.serve_forever()
+
+asyncio.run(main())
+"""
+SHOP_PORT = 8443
+
+
 def files_for(inv, n):
     """Files per node, in install order; for a leaf the last one (the commit hook) is run once installed."""
     if n["role"] not in ("spine", "leaf", "border", "fw", "wan"): return {}
+    if n["role"] == "wan":
+        import ipaddress
+        src = str(ipaddress.ip_network(inv["wan"]["clients"]).network_address + 1)
+        relay = (SHOP_RELAY_PY.replace("@LISTEN@", f"{n['mgmt_ip']}:{SHOP_PORT}").replace("@LISTEN_IP@", n["mgmt_ip"])
+                 .replace("@LISTEN_PORT@", str(SHOP_PORT)).replace("@VIP@", inv["web_vip"]).replace("@SRC@", src))
+        return {PRECONFIG: PRECONFIG_SH, SHOP_RELAY: relay}
     if n["role"] not in ("leaf", "border"): return {PRECONFIG: PRECONFIG_SH}
     hook = (ANYCAST.replace("@ANYCAST_MAC@", inv["evpn"]["anycast_mac"]).replace("@CRON@", CRON).replace("@REFRESH@", REFRESH)
             .replace("@PROTODOWN@", PROTODOWN).replace("@STARTUP_DELAY@", str(STARTUP_DELAY)))
@@ -274,6 +315,12 @@ def push(inv, node, n):
         for path, body in files.items():
             run(f"sudo mkdir -p {Path(path).parent} && sudo tee {path} >/dev/null && sudo chmod 755 {path}", body)
         run(FRR_LOG_NOW)                                                                         # FRR state changes to syslog, now
+        if SHOP_RELAY in files:   # at boot, and (re)started now
+            run(f"grep -qF '{SHOP_RELAY}' {BOOT} || echo 'setsid -f {SHOP_RELAY} </dev/null >/dev/null 2>&1' | sudo tee -a {BOOT} >/dev/null")
+            # three SSH calls: a shell whose command line names the relay would match its own pkill / pgrep pattern
+            run("sudo pkill -f '[e]vpn-3tier-shop-relay'; true")
+            run(f"setsid -f {SHOP_RELAY} </dev/null >/dev/null 2>&1")
+            run("sleep 1; pgrep -f '[s]hop-relay' >/dev/null")
         if HOOK in files:
             run(f"grep -qF '{HOOK}' {BOOT} || echo '{HOOK}' | sudo tee -a {BOOT} >/dev/null")    # at boot
             run(HOOK)                                                                            # and now

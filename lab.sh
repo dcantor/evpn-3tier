@@ -310,6 +310,10 @@ cmd_ssh() {
 cmd_show() { local n="${1:?node}"; shift; known "$n"; is_vyos "$n" || die "$n is not a VyOS node"; need_python; "$PY" "$LAB_DIR/tools/vyos_cmd.py" "${MGMT_IP[$n]}" "$*"; }
 cmd_log() { tail -n "${2:-50}" -f "$(node_dir "${1:?node}")/console.log"; }
 cmd_verify() { need_python; "$PY" "$LAB_DIR/tools/verify.py" "$@"; }   # control plane + data plane, end to end
+cmd_webapp() {     # the portal (webapp/, FastAPI) on :8119; as a service: evpn-3tier-webapp (user unit)
+  [[ -x "$LAB_DIR/webapp/.venv/bin/python" ]] || "$LAB_DIR/webapp/setup.sh"
+  cd "$LAB_DIR/webapp" && exec .venv/bin/python app.py
+}
 cmd_chaos() { need_python; "$PY" "$LAB_DIR/tools/chaos.py" "$@"; }   # a component fails under load (tools/chaos.py)
 cmd_db() { need_python; "$PY" "$LAB_DIR/tools/dbctl.py" "$@"; }       # status | promote | reseed | switchover
 cmd_test() { need_python; exec "$LAB_DIR/tests/run.sh" "$@"; }       # the Robot Framework suites (results/<timestamp>/)
@@ -335,6 +339,7 @@ usage: $(basename "$0") <command> [node...]
   check-wiring       prove every link reaches the peer port lab.conf names (by MAC; bond legs by LACP partner)
   verify [--quick]   fabric, firewall sessions and preference, data plane, the firewall policy matrix (--quick: no matrix)
   services [--reseed] [node..]  deploy the application: PostgreSQL primary + replica, app, nginx, HAProxy + keepalived
+  webapp             the portal on :8119 (state, runs, /shop/, /metrics, /api/sd, /docs); as a service: evpn-3tier-webapp
   chaos <scenario>   under load from wan: lb | web | app | db | leaf | border | fw | all — fail it, restore, count losses
   db [status|promote N|reseed N FROM|switchover N]   PostgreSQL roles
   test [robot args]  the Robot suites (~35 min); --exclude disruptive: the read-only ones (~3 min)
@@ -347,6 +352,6 @@ U
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services|chaos|db|test) "cmd_$cmd" "$@" ;;
+  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services|chaos|db|test|webapp) "cmd_$cmd" "$@" ;;
   *) usage; exit 1 ;;
 esac
