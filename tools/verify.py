@@ -40,6 +40,12 @@ def fabric(n):
     edown = [p for p in want if ((ev.get("peers") or {}).get(p) or {}).get("state") != "Established"]
     out.append((f"{n['name']}: EVPN sessions {len(want) - len(edown)}/{len(want)}", not edown, f"down: {edown}"))
     bfd = vtysh_json(n["name"], "show bfd peers", inv) or []
+    # only the sessions the lab defines: fabric links (IPv6 link-local), firewall transit, wan. A BFD peer the lab does not
+    # know (a load balancer peering added in Nautobot by the self-service app) is checked by that request's own steps —
+    # the switches pipeline applies its side before the load balancer is set up, so it is legitimately down meanwhile
+    known = {c.split("/")[0] for t in inv["evpn"]["transit"] for c in t["fws"].values()} | \
+            {w[k].split("/")[0] for w in inv["wan"]["links"] for k in ("wan_ip", "border_ip")}
+    bfd = [b for b in bfd if ":" in str(b.get("peer", "")) or b.get("peer") in known]
     bdown = [b.get("peer") or b.get("interface") for b in bfd if b.get("status") != "up"]
     out.append((f"{n['name']}: BFD {len(bfd) - len(bdown)}/{len(bfd)} up", bfd and not bdown, f"down: {bdown}"))
     if n["role"] in ("leaf", "border"):
