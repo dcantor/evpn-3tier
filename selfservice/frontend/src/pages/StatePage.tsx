@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { applies, devicesApi, saveText, type Device, type DeviceState, type IfRow, type StateCategory, type StateResult } from "../api";
+import { applies, devicesApi, saveText, type Device, type DeviceState, type IfRow, type PathRow, type StateCategory, type StateResult } from "../api";
 import { Card, Empty, ErrorNote, Icon, Spinner, TimeAgo } from "../ui";
 import DevicePicker from "./DevicePicker";
 
@@ -27,6 +27,43 @@ function IfTable({ rows }: { rows: IfRow[] }) {
   );
 }
 
+/** BGP paths: one row per path, the AS path as a chain of ASN chips; filter by VRF, best only, text. */
+function PathTable({ rows }: { rows: PathRow[] }) {
+  const vrfs = [...new Set(rows.map((r) => r.vrf))];
+  const [vrf, setVrf] = useState("");
+  const [bestOnly, setBestOnly] = useState(false);
+  const [q, setQ] = useState("");
+  const shown = rows.filter((r) => (!vrf || r.vrf === vrf) && (!bestOnly || r.best) &&
+    (!q || `${r.prefix} ${r.as_path} ${r.next_hop}`.toLowerCase().includes(q.toLowerCase())));
+  const longest = Math.max(0, ...rows.map((r) => (r.as_path ? r.as_path.split(" ").length : 0)));
+  return (
+    <>
+      <div className="row gap-s wrap path-bar">
+        <button className={`chip ${vrf === "" ? "on" : ""}`} onClick={() => setVrf("")}>All VRFs</button>
+        {vrfs.map((v) => <button key={v} className={`chip ${vrf === v ? "on" : ""}`} onClick={() => setVrf(v)}>{v}</button>)}
+        <label className="small row gap-s auto"><input type="checkbox" checked={bestOnly} onChange={(e) => setBestOnly(e.target.checked)} />Best paths only</label>
+        <label className="search"><Icon name="search" /><input placeholder="Prefix, ASN or next hop" value={q} onChange={(e) => setQ(e.target.value)} /></label>
+        <span className="small mute">{shown.length} of {rows.length} paths · longest AS path {longest}</span>
+      </div>
+      <div className="table-wrap path-wrap">
+        <table className="table path-table">
+          <thead><tr><th>VRF</th><th>Prefix</th><th></th><th>AS path</th><th>Next hop</th><th>Origin</th></tr></thead>
+          <tbody>{shown.map((r, i) => (
+            <tr key={i} className={r.best ? "best" : ""}>
+              <td className="small">{r.vrf}</td>
+              <td className="mono">{r.prefix}</td>
+              <td>{r.best ? <span className="pill s-done" title={r.reason ? `best: ${r.reason}` : "best"}>best</span> : r.multipath ? <span className="pill s-running">multipath</span> : !r.valid ? <span className="pill s-failed">invalid</span> : null}</td>
+              <td>{r.as_path ? <span className="aspath">{r.as_path.split(" ").map((a, j) => <span key={j} className={`asn ${String(r.local_as) === a ? "own" : ""}`}>{a}</span>)}</span>
+                : <span className="mute small">local (this router)</span>}</td>
+              <td className="mono small">{r.next_hop}</td>
+              <td className="small mute">{r.origin}</td>
+            </tr>))}</tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 function Output({ text, filter }: { text: string; filter: string }) {
   const f = filter.toLowerCase();
   const lines = text.split("\n");
@@ -41,12 +78,12 @@ function ResultCard({ r, device }: { r: StateResult; device: string }) {
   return (
     <Card title={r.label} pad={false} actions={
       <div className="row gap-s">
-        {r.table && <button className="btn ghost sm" onClick={() => setRaw(!raw)}>{raw ? "Table" : "Raw output"}</button>}
-        {(!r.table || raw) && <label className="search"><Icon name="search" /><input placeholder="Filter lines" value={filter} onChange={(e) => setFilter(e.target.value)} /></label>}
+        {(r.table || r.paths) && <button className="btn ghost sm" onClick={() => setRaw(!raw)}>{raw ? "Table" : "Raw output"}</button>}
+        {(!(r.table || r.paths) || raw) && <label className="search"><Icon name="search" /><input placeholder="Filter lines" value={filter} onChange={(e) => setFilter(e.target.value)} /></label>}
         <button className="btn ghost sm" onClick={() => saveText(`${device}-${r.key}.txt`, text)} title="Download"><Icon name="ext" />.txt</button>
       </div>}>
       <div className="card-b stack-s">
-        {r.table && !raw ? <IfTable rows={r.table} /> : r.sections.map((s) => (
+        {r.table && !raw ? <IfTable rows={r.table} /> : r.paths && !raw ? <PathTable rows={r.paths} /> : r.sections.map((s) => (
           <div key={s.title}>
             <div className="sec-h"><strong>{s.title}</strong><code className="small mute">{s.command}</code></div>
             <Output text={s.output} filter={filter} />

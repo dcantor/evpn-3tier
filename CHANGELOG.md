@@ -2,6 +2,14 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.1] - 2026-11-09
+
+### Added
+- Retrieve Device State: *BGP AS paths* — VyOS: every IPv4 path in every VRF (from FRR's JSON) as a table with the AS
+  path drawn as a chain of ASNs, best / multipath / invalid, next hop, origin, filters (VRF, best only, text), plus the
+  raw table and EVPN type-5 prefixes; load balancers: BIRD's routes with attributes and its sessions (local / neighbour
+  AS). 49 tests.
+
 ## [0.17.0] - 2026-11-09
 
 ### Changed

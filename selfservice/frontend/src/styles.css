@@ -249,6 +249,16 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .state-out { max-height: 420px; }
 .if-sum { display: flex; gap: 14px; margin-bottom: 8px; }
 .if-table td, .if-table th { padding: 7px 10px; }
+/* BGP AS paths */
+.path-bar { margin-bottom: 10px; }
+.path-wrap { max-height: 560px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-s); }
+.path-table th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.path-table td, .path-table th { padding: 6px 10px; }
+.path-table tr.best td { background: color-mix(in srgb, var(--ok-soft) 45%, transparent); }
+.aspath { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.asn { font: 600 11.5px var(--mono); padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.asn + .asn::before { content: "›"; margin: 0 4px 0 -6px; color: var(--mute); font-weight: 400; padding-right: 2px; }
+.asn.own { background: var(--warn-soft); color: var(--warn); }
 a.btn[aria-disabled="true"] { opacity: .55; cursor: default; }
 
 /* ---- a request ---------------------------------------------------------------------------------------------------------- */

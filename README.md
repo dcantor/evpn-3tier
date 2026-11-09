@@ -129,7 +129,8 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   Configurations** — any device's running configuration fetched live (VyOS: set commands or hierarchical; Alpine: its
   role's files — network, HAProxy, keepalived, BIRD, nginx, the app service, PostgreSQL), find-in, copy, download as
   .txt, or several / every device as a zip; **Retrieve Device State** — interfaces (a table with up / down badges),
-  routing tables, BGP (FRR, or BIRD on the load balancers), EVPN / VXLAN, learned MACs, ARP, BFD, VRRP, bond / LACP,
+  routing tables, BGP (FRR, or BIRD on the load balancers), **BGP AS paths** (every path in every VRF as a table —
+  the AS path as a chain of ASNs, best / multipath, next hop, origin; filter by VRF, best only, prefix / ASN), EVPN / VXLAN, learned MACs, ARP, BFD, VRRP, bond / LACP,
   services, system — per device, categories that apply to its kind and role, optional 15 s auto-refresh, download.
   Only commands from a fixed list run (the browser names a device and categories, never a command); secrets (password
   hashes, BGP / VRRP passwords, keys, communities, HAProxy stats auth) are redacted; each retrieval is logged.
@@ -187,7 +188,7 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (48: forms, allocation, removal, device tools (redaction, parsing), phpIPAM-first order and its guards, flows, approval, the log parser,
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (49: forms, allocation, removal, device tools (redaction, parsing, AS paths), phpIPAM-first order and its guards, flows, approval, the log parser,
   progress, the API); the front end type-checks in its build (`tsc -b`, strict).
 
 Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift

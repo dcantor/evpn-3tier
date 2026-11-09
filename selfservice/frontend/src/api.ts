@@ -92,7 +92,9 @@ export type StateCategory = { key: string; label: string; help: string; kinds: s
 export type DeviceList = { devices: Device[]; formats: { key: string; label: string }[]; state: StateCategory[] };
 export type DeviceConfig = { device: string; kind: string; format: string; text: string; files: { path: string; text: string }[]; lines: number; fetched: string; ms: number };
 export type IfRow = { name: string; addresses: string[]; mac: string | null; vrf: string | null; mtu: string | null; admin: string; link: string; description: string | null };
-export type StateResult = { key: string; label: string; sections: { title: string; command: string; output: string }[]; table?: IfRow[] | null };
+export type PathRow = { vrf: string; prefix: string; best: boolean; multipath: boolean; valid: boolean; as_path: string; origin: string | null;
+  next_hop: string; peer: string | null; reason: string | null; local_as: number | null };
+export type StateResult = { key: string; label: string; sections: { title: string; command: string; output: string }[]; table?: IfRow[] | null; paths?: PathRow[] | null };
 export type DeviceState = { device: string; kind: string; role: string; results: StateResult[]; skipped: string[]; fetched: string; ms: number };
 
 export const devicesApi = {

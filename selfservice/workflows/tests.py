@@ -484,3 +484,20 @@ eth5         -                 52:54:00:d0:03:06  default   1500  u/D    spare
             self.assertEqual(z["Content-Type"], "application/zip")
             import io, zipfile
             self.assertEqual(zipfile.ZipFile(io.BytesIO(z.content)).namelist(), ["leaf1.txt"])
+
+
+class AsPathTests(TestCase):
+    def test_parse_frr_paths(self):
+        import json as J
+        from .devices import applies, parse_frr_paths
+        out = J.dumps({"outside": {"vrfName": "outside", "localAS": 65121, "routes": {
+            "0.0.0.0/0": [{"valid": True, "bestpath": True, "selectionReason": "AS Path", "path": "65000", "origin": "IGP", "peerId": "172.31.1.1", "nexthops": [{"ip": "172.31.1.1"}]},
+                          {"valid": True, "multipath": True, "path": "65100 65122 65000", "origin": "IGP", "nexthops": [{"ip": "10.61.0.22"}]}],
+            "10.255.99.21/32": [{"valid": True, "bestpath": True, "path": "", "origin": "incomplete", "nexthops": [{"ip": "0.0.0.0"}]}]}}})
+        rows = parse_frr_paths(out)
+        self.assertEqual([(r["prefix"], r["best"], r["as_path"]) for r in rows],
+                         [("0.0.0.0/0", True, "65000"), ("0.0.0.0/0", False, "65100 65122 65000"), ("10.255.99.21/32", True, "")])
+        self.assertTrue(rows[1]["multipath"]); self.assertEqual(rows[0]["reason"], "AS Path")
+        self.assertIsNone(parse_frr_paths("not json"))
+        self.assertTrue(applies("aspath", {"kind": "vyos", "role": "spine"})); self.assertTrue(applies("aspath", {"kind": "linux", "role": "lb"}))
+        self.assertFalse(applies("aspath", {"kind": "linux", "role": "db"}))

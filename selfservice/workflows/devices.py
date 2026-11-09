@@ -44,6 +44,12 @@ STATE = {
     "bgp": ("BGP", "Sessions and prefixes", {
         "vyos": [("BGP summary (every VRF)", "vtysh", "show bgp vrf all summary"), ("EVPN sessions", "vtysh", "show bgp l2vpn evpn summary")],
         "linux": [("BIRD protocols", "sh", "doas birdc show protocols"), ("BIRD routes", "sh", "doas birdc show route")]}, ("vyos", "lb")),
+    "aspath": ("BGP AS paths", "Every BGP path with its AS path, next hop and origin; best and multipath marked", {
+        "vyos": [("IPv4 unicast, every VRF", "vtysh", "show bgp vrf all ipv4 unicast"),
+                 ("EVPN IP prefixes (type 5)", "vtysh", "show bgp l2vpn evpn route type prefix"),
+                 ("_json", "vtysh", "show bgp vrf all ipv4 unicast json")],
+        "linux": [("BIRD routes with attributes", "sh", "doas birdc show route all"),
+                  ("BGP sessions: local and neighbour AS (the borders show the AS path as received)", "sh", "doas birdc show protocols all 'border*'")]}, ("vyos", "lb")),
     "evpn": ("EVPN / VXLAN", "VNIs, remote VTEPs, Ethernet segments", {
         "vyos": [("VNIs", "vtysh", "show evpn vni"), ("Ethernet segments", "vtysh", "show evpn es"), ("Remote VTEPs", "vtysh", "show evpn vni detail")]}, ("leaf", "border")),
     "mac": ("MAC addresses", "Learned MACs: EVPN (local and remote) and the bridge's FDB", {
@@ -162,6 +168,9 @@ def state(name, cats):
     results = {}
     for (c, title, how, cmd), out in zip(plan, outs):
         r = results.setdefault(c, {"key": c, "label": STATE[c][0], "sections": []})
+        if title == "_json":                                                  # machine-readable twin: becomes a table
+            if c == "aspath": r["paths"] = parse_frr_paths(out)
+            continue
         r["sections"].append({"title": title, "command": cmd if how != "vtysh" else f"vtysh: {cmd}", "output": redact(out)})
     if "interfaces" in results:
         out = results["interfaces"]["sections"][0]["output"]
@@ -169,6 +178,32 @@ def state(name, cats):
     return {"device": name, "kind": d["kind"], "role": d["role"], "results": [results[c] for c in want],
             "skipped": [c for c in cats if c in STATE and c not in want],
             "fetched": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "ms": int(1000 * (time.monotonic() - t0))}
+
+
+# ---- BGP paths (FRR's JSON: every VRF, every path) ---------------------------------------------------------------------------
+def parse_frr_paths(out):
+    import json as _json
+    try: d = _json.loads(out)
+    except ValueError: return None
+    rows = []
+    for vrf, t in d.items():
+        if not isinstance(t, dict): continue
+        for prefix, paths in (t.get("routes") or {}).items():
+            for p in paths:
+                nh = [n.get("ip") or n.get("interface") or n.get("hostname") for n in p.get("nexthops", [])]
+                rows.append({"vrf": t.get("vrfName", vrf), "prefix": prefix, "best": bool(p.get("bestpath")), "multipath": bool(p.get("multipath")),
+                             "valid": bool(p.get("valid")), "as_path": p.get("path", ""), "origin": p.get("origin"),
+                             "next_hop": ", ".join(x for x in nh if x) or "", "peer": p.get("peerId"), "reason": p.get("selectionReason"),
+                             "local_as": t.get("localAS")})
+    vorder = {"default": 0}
+    return sorted(rows, key=lambda r: (vorder.get(r["vrf"], 1), r["vrf"], _pfx_key(r["prefix"]), not r["best"]))
+
+
+def _pfx_key(p):
+    try:
+        import ipaddress as _ip
+        n = _ip.ip_network(p, strict=False); return (n.version, int(n.network_address), n.prefixlen)
+    except ValueError: return (9, 0, 0)
 
 
 # ---- interface tables (the state view shows them as a table with up / down badges) -------------------------------------------
