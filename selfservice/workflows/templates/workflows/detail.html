@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block title %}#{{ r.pk }}{% endblock %}
+{% block content %}
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2>#{{ r.pk }} {{ r.title }} <span class="pill s-{{ r.status }}">{{ r.get_status_display }}</span></h2>
+      <dl class="kv">
+        <dt>Workflow</dt><dd>{{ wf.name|default:r.workflow }}</dd>
+        <dt>Requested by</dt><dd>{{ r.requested_by.get_username }}</dd>
+        <dt>Submitted</dt><dd>{{ r.created|date:"Y-m-d H:i" }}</dd>
+        <dt>Why</dt><dd>{{ r.reason|linebreaksbr }}</dd>
+      </dl>
+      <h2 style="margin-top:16px">Parameters</h2>
+      <dl class="kv">{% for k, v in r.parameters.items %}<dt>{{ k }}</dt><dd class="mono">{% if v|stringformat:"s"|slice:":1" == "[" %}{{ v|join:", " }}{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
+      {% if can_cancel %}<form method="post" action="{% url 'cancel_request' r.pk %}" style="margin-top:16px">{% csrf_token %}
+        <button class="btn danger" onclick="return confirm('Cancel request #{{ r.pk }}?')">Cancel this request</button></form>{% endif %}
+    </div>
+  </div>
+  <div>
+    <div class="card"><h2>History</h2>
+      <table>{% for e in events %}<tr><td class="small mute">{{ e.at|date:"Y-m-d H:i" }}</td><td><b>{{ e.kind }}</b> by {{ e.actor.get_username|default:"system" }}{% if e.message %}<div class="small">{{ e.message|linebreaksbr }}</div>{% endif %}</td></tr>{% endfor %}</table>
+    </div>
+    {% if wf %}<div class="card"><h2>When it is carried out</h2><ul class="will">{% for w in wf.will_do %}<li>{{ w }}</li>{% endfor %}</ul></div>{% endif %}
+  </div>
+</div>
+{% endblock %}

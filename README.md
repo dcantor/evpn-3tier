@@ -92,6 +92,23 @@ report against lab.conf (VyOS repos) -> check mode with diff -> apply -> `lab.sh
 
 `lab.sh configure` / `services` still work (lab.conf); once Nautobot is edited they would push lab.conf's values back.
 
+## Self-service: request workflows (Django, `selfservice/`)
+
+Since 0.8.0: **http://192.168.50.231:8120/** — a Django 6.1 app (user unit `evpn-3tier-selfservice`, gunicorn,
+`./lab.sh selfservice`; SQLite in selfservice/data/) where users **request workflows on the lab**. For now it records and
+validates requests; carrying them out (Nautobot, the Gitea pipelines, phpIPAM) comes next.
+
+- **Catalog** (selfservice/workflows/catalog.py + forms.py): *Add a VLAN to the fabric* (VLAN ID, name, VRF, gateway
+  prefix, leaves or leaves + borders) and *Set up a load balancer to peer with the fabric* (name, switch pair, VRF, ASN,
+  peering VLAN and subnet, VIP prefixes, BFD). Each form is checked against the live lab (`lab.sh inventory`): VLAN IDs
+  and VNIs free, subnets inside 172.16.0.0/16 and overlapping nothing, private ASNs the lab does not use.
+- **Requests** keep their parameters, the requester, a status (submitted / cancelled now; approved / running / done /
+  failed / rejected are there for execution) and a history of events.
+- **Users** are Django accounts: group *requesters* (submit, see and cancel their own), group *operators* (see every
+  request). Accounts are made in Django admin (/admin/). The admin account and the secret key are in
+  `~/.config/evpn-3tier/selfservice.env` (mode 600), made by `manage.py e3t_setup` (selfservice/setup.sh runs it).
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (20).
+
 ## External IPAM: phpIPAM (node `ipam`)
 
 Since 0.7.0 the lab has an external IPAM: **phpIPAM 1.8.3** on the 20th VM, `ipam` (Alpine + Docker: phpipam-www and

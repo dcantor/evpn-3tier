@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}New request{% endblock %}
+{% block content %}
+<div class="card"><h2>New request</h2>
+{% for wf in catalog %}
+<div class="wf"><h3>{{ wf.name }}</h3><p>{{ wf.summary }}</p>
+  <div class="small mute">When carried out:</div><ul class="will">{% for w in wf.will_do %}<li>{{ w }}</li>{% endfor %}</ul>
+  <p style="margin-top:10px"><a class="btn" href="{% url 'new_request' wf.slug %}">Request this</a></p></div>
+{% endfor %}
+</div>
+{% endblock %}

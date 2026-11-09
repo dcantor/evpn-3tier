@@ -1,0 +1,39 @@
+{% extends "base.html" %}{% block title %}My requests{% endblock %}
+{% block content %}
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2>My requests</h2>
+      {% if mine %}
+      <div class="wrap"><table>
+        <tr><th>#</th><th>Request</th><th>Status</th><th>Submitted</th></tr>
+        {% for r in mine %}<tr><td><a href="{{ r.get_absolute_url }}">{{ r.pk }}</a></td><td><a href="{{ r.get_absolute_url }}">{{ r.title }}</a></td>
+          <td><span class="pill s-{{ r.status }}">{{ r.get_status_display }}</span></td><td class="mute">{{ r.created|date:"Y-m-d H:i" }}</td></tr>{% endfor %}
+      </table></div>
+      {% else %}<p class="mute">None yet. <a href="{% url 'catalog' %}">Request something</a>.</p>{% endif %}
+    </div>
+    <div class="card">
+      <h2>What you can request</h2>
+      {% for wf in catalog %}
+      <div class="wf"><h3>{{ wf.name }}</h3><p>{{ wf.summary }}</p><a class="btn secondary" href="{% url 'new_request' wf.slug %}">Request</a></div>
+      {% endfor %}
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>The lab now</h2>
+      {% if lab %}
+      <dl class="kv small">
+        <dt>VRFs</dt><dd>{{ lab.vrfs|join:", " }}</dd>
+        <dt>Tier VLANs</dt><dd>{% for v in lab.tier_vlans %}{{ v.vlan }} ({{ v.vrf }}, {{ v.gateway }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</dd>
+        <dt>VLAN IDs in use</dt><dd>{{ lab.vlans_used|join:", " }}</dd>
+        <dt>Switch pairs</dt><dd>{% for k, v in lab.switch_pairs.items %}{{ k }}: {{ v|join:", " }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</dd>
+        <dt>ASNs in use</dt><dd>{{ lab.asns_used|join:", " }}</dd>
+      </dl>
+      {% else %}<p class="errorlist">The lab model is not available: {{ lab_error }}</p>{% endif %}
+    </div>
+    {% if is_operator %}<div class="card"><h2>Open requests (everyone)</h2>
+      <p class="small">{{ counts.submitted }} submitted · {{ counts.approved }} approved · {{ counts.running }} running — <a href="{% url 'all_requests' %}">all requests</a></p></div>{% endif %}
+  </div>
+</div>
+{% endblock %}

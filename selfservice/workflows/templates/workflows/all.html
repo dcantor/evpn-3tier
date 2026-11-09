@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}All requests{% endblock %}
+{% block content %}
+<div class="card"><h2>All requests</h2>
+  <p class="small">Status: <a href="?">all</a>{% for v, l in statuses %} · <a href="?status={{ v }}">{% if v == status %}<b>{{ l }}</b>{% else %}{{ l }}{% endif %}</a>{% endfor %}</p>
+  <div class="wrap"><table>
+    <tr><th>#</th><th>Request</th><th>By</th><th>Status</th><th>Submitted</th></tr>
+    {% for r in requests %}<tr><td><a href="{{ r.get_absolute_url }}">{{ r.pk }}</a></td><td><a href="{{ r.get_absolute_url }}">{{ r.title }}</a></td><td>{{ r.requested_by.get_username }}</td>
+      <td><span class="pill s-{{ r.status }}">{{ r.get_status_display }}</span></td><td class="mute">{{ r.created|date:"Y-m-d H:i" }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="mute">No requests.</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endblock %}

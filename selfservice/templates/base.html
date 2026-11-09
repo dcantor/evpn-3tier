@@ -1,0 +1,28 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Self-service{% endblock %} · evpn-3tier</title>
+<link rel="stylesheet" href="{% static 'workflows/style.css' %}">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='6' width='24' height='5' rx='2' fill='%232563eb'/%3E%3Crect x='4' y='14' width='16' height='5' rx='2' fill='%2316a34a'/%3E%3Crect x='4' y='22' width='20' height='5' rx='2' fill='%23d97706'/%3E%3C/svg%3E">
+</head>
+<body>
+<header>
+  <h1><a href="{% url 'dashboard' %}">evpn-3tier self-service</a></h1><span class="sub">request changes to the lab</span>
+  {% if user.is_authenticated %}
+  <nav>
+    <a href="{% url 'dashboard' %}">My requests</a>
+    <a href="{% url 'catalog' %}">New request</a>
+    {% if is_operator %}<a href="{% url 'all_requests' %}">All requests</a>{% endif %}
+    {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
+    <span class="mute">{{ user.get_username }}</span>
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Sign out</button></form>
+  </nav>
+  {% endif %}
+</header>
+<main>
+  {% if messages %}<ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

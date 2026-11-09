@@ -1,0 +1,4 @@
+# evpn-3tier self-service (Django)
+Django==6.1.3
+gunicorn==26.2.0
+whitenoise==6.12.0

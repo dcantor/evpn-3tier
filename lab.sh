@@ -319,6 +319,10 @@ cmd_webapp() {     # the portal (webapp/, FastAPI) on :8119; as a service: evpn-
 cmd_chaos() { need_python; "$PY" "$LAB_DIR/tools/chaos.py" "$@"; }   # a component fails under load (tools/chaos.py)
 cmd_db() { need_python; "$PY" "$LAB_DIR/tools/dbctl.py" "$@"; }       # status | promote | reseed | switchover
 cmd_test() { need_python; exec "$LAB_DIR/tests/run.sh" "$@"; }       # the Robot Framework suites (results/<timestamp>/)
+cmd_selfservice() {   # the self-service app (selfservice/, Django) on :8120; as a service: evpn-3tier-selfservice
+  [[ -x "$LAB_DIR/selfservice/.venv/bin/gunicorn" ]] || "$LAB_DIR/selfservice/setup.sh"
+  cd "$LAB_DIR/selfservice" && exec .venv/bin/gunicorn selfservice.wsgi --bind 0.0.0.0:"${SELFSERVICE_PORT:-8120}" --workers 2 --access-logfile - --error-logfile -
+}
 cmd_ipam() { need_python; "$PY" "$LAB_DIR/tools/phpipam_load.py" "$@"; }   # load the lab's subnets and addresses into phpIPAM
 cmd_services() { need_python; "$PY" "$LAB_DIR/tools/services.py" "$@"; }   # the application: db, app, web, lb (tools/services.py)
 cmd_fw-failover() { need_python; "$PY" "$LAB_DIR/tools/fw_failover.py" "$@"; }   # power fw1 off under a live connection, then back
@@ -342,6 +346,7 @@ usage: $(basename "$0") <command> [node...]
   check-wiring       prove every link reaches the peer port lab.conf names (by MAC; bond legs by LACP partner)
   verify [--quick]   fabric, firewall sessions and preference, data plane, the firewall policy matrix (--quick: no matrix)
   services [--reseed] [node..]  deploy the application: PostgreSQL primary + replica, app, nginx, HAProxy + keepalived
+  selfservice        the self-service app on :8120 (Django: request workflows on the lab); as a service: evpn-3tier-selfservice
   ipam [--check]     load every subnet, VLAN, VRF and address of the lab into phpIPAM (node ipam, http://10.18.0.5/)
   webapp             the portal on :8119 (state, runs, /shop/, /metrics, /api/sd, /docs); as a service: evpn-3tier-webapp
   chaos <scenario>   under load from wan: lb | web | app | db | leaf | border | fw | all — fail it, restore, count losses
@@ -356,6 +361,6 @@ U
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services|chaos|db|test|webapp|ipam) "cmd_$cmd" "$@" ;;
+  gen|up|down|bootstrap|configure|wait|status|inventory|console|ssh|show|log|rebuild|clean|check-wiring|verify|fw-failover|services|chaos|db|test|webapp|ipam|selfservice) "cmd_$cmd" "$@" ;;
   *) usage; exit 1 ;;
 esac

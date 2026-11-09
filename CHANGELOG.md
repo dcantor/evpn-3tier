@@ -2,6 +2,15 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.0] - 2026-11-08
+
+### Added
+- Self-service app (selfservice/, Django 6.1.3, gunicorn, SQLite): http://192.168.50.231:8120/ (user unit
+  evpn-3tier-selfservice, `./lab.sh selfservice`). Users request workflows — *Add a VLAN to the fabric*, *Set up a load
+  balancer to peer with the fabric* — validated against the live lab; requests keep parameters, requester, status and
+  history. Django accounts: requesters and operators groups; admin account and secret key in
+  ~/.config/evpn-3tier/selfservice.env. 20 tests. Lab Hub link. Execution of the workflows: next phase.
+
 ## [0.7.1] - 2026-11-08
 
 ### Added

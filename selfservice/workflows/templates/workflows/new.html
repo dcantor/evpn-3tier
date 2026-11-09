@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}{{ wf.name }}{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h2>{{ wf.name }}</h2>
+    <p class="mute">{{ wf.summary }}</p>
+    {% if form.non_field_errors %}<ul class="errorlist">{% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+    <form method="post" class="f" novalidate>{% csrf_token %}
+      {% for field in form %}
+      <p>{{ field.label_tag }}{{ field }}{% if field.errors %}<ul class="errorlist">{% for e in field.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+        {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}</p>
+      {% endfor %}
+      <button class="btn">Submit the request</button> <a href="{% url 'catalog' %}" class="btn secondary">Back</a>
+    </form>
+  </div>
+  <div class="card">
+    <h2>When it is carried out</h2>
+    <ul class="will">{% for w in wf.will_do %}<li>{{ w }}</li>{% endfor %}</ul>
+    <p class="small mute" style="margin-top:12px">Requests are checked against the lab as it is now (VLANs, VNIs, subnets and ASNs in use). Carrying them out comes later; for now a request is recorded for an operator.</p>
+  </div>
+</div>
+{% endblock %}
