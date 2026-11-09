@@ -143,7 +143,15 @@ export type HealthRow = { device: string; role: string; ok: boolean; error?: str
   bgp?: { up: number; total: number; down: string[]; underlay_up: number }; bfd?: { up: number; total: number }; vnis?: number[] | null };
 export type FabricHealth = { kpis: Kpi[]; devices: HealthRow[]; fetched: string; age_s: number };
 
+export type RecIssue = { object: string; kind: "only_phpipam" | "only_nautobot" | "mismatch"; detail: string; phpipam: string | null; nautobot: string | null;
+  severity: "error" | "warning" | "in_flight"; requests: number[]; in_flight: number[] };
+export type RecCheck = { key: string; label: string; matched: number; total: number; errors: number; warnings: number; in_flight: number; issues: RecIssue[] };
+export type Reconcile = { checks: RecCheck[]; ignored: { object: string; why: string }[]; fetched: string; age_s: number; ms: number;
+  summary: { matched: number; total: number; errors: number; warnings: number; in_flight: number; in_sync: boolean };
+  counts: Record<string, number> };
+
 export const fabricApi = {
+  reconcile: (refresh = false) => call<Reconcile>("GET", `/fabric/reconcile${refresh ? "?refresh=true" : ""}`),
   design: (refresh = false) => call<Fabric>("GET", `/fabric${refresh ? "?refresh=true" : ""}`),
   health: (refresh = false) => call<FabricHealth>("GET", `/fabric/health${refresh ? "?refresh=true" : ""}`),
 };

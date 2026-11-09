@@ -307,3 +307,13 @@ def fabric_health(request, refresh: bool = False):
     try: return fabric.health(refresh)
     except Exception as e:                                                    # noqa: BLE001
         raise HttpError(502, f"{type(e).__name__}: {e}")
+
+
+@api.get("/fabric/reconcile", tags=["fabric"])
+def fabric_reconcile(request, refresh: bool = False):
+    """phpIPAM against Nautobot: VRFs, VLANs, subnets, probe subnets, gateways, assigned addresses, and Nautobot's plan
+    against its own objects. Read-only (it repairs nothing); cached 30 s."""
+    from . import reconcile
+    try: return reconcile.report(refresh)
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"{type(e).__name__}: {e}")

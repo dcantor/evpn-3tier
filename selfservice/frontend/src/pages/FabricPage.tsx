@@ -2,7 +2,7 @@
 // they imply) comes from Nautobot; the live check compares the running network with it over read-only SSH.
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { fabricApi, type Fabric, type FabricHealth, type Kpi } from "../api";
+import { fabricApi, type Fabric, type FabricHealth, type Kpi, type Reconcile } from "../api";
 import { useLiveData } from "../live";
 import { Card, dur, ErrorNote, Icon, Spinner, TimeAgo } from "../ui";
 
@@ -102,6 +102,69 @@ function Health({ h, loading, onRefresh, err }: { h: FabricHealth | null; loadin
   );
 }
 
+
+const SEV: Record<string, [string, string]> = { error: ["s-failed", "drift"], warning: ["s-submitted", "warning"], in_flight: ["s-running", "in flight"] };
+const KIND: Record<string, string> = { only_phpipam: "only in phpIPAM", only_nautobot: "only in Nautobot", mismatch: "differs" };
+
+/** phpIPAM against Nautobot: what each should hold, compared; read-only. */
+function SourcesOfTruth() {
+  const [r, setR] = useState<Reconcile | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = async (force: boolean) => {
+    setBusy(true); setErr(null);
+    try { setR(await fabricApi.reconcile(force)); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  useEffect(() => { load(false); }, []);
+  const issues = r?.checks.flatMap((c) => c.issues.map((i) => ({ ...i, check: c.label }))) ?? [];
+  const s = r?.summary;
+  return (
+    <Card title={<><Icon name="layers" />Sources of truth: phpIPAM ↔ Nautobot</>} actions={
+      <div className="row gap-s">
+        {r && <span className="small mute">checked <TimeAgo iso={r.fetched} /></span>}
+        <button className="btn sm" onClick={() => load(true)} disabled={busy}>{busy ? <Spinner /> : <Icon name="retry" />}Check now</button>
+      </div>}>
+      {err && <ErrorNote>{err}</ErrorNote>}
+      {!r && !err && <div className="row gap-s mute"><Spinner />Comparing phpIPAM with Nautobot…</div>}
+      {r && s && <>
+        <KpiGrid kpis={[
+          { key: "sync", label: "In sync", value: s.in_sync ? "Yes" : "No", tone: s.in_sync ? (s.warnings ? "warn" : "ok") : "bad",
+            detail: s.in_sync ? (s.warnings ? "no drift; cosmetic differences only" : "every object agrees") : "the two systems disagree: see below" },
+          { key: "match", label: "Objects that match", value: `${s.matched}/${s.total}`, tone: s.matched === s.total ? "ok" : undefined,
+            detail: `${r.counts.phpipam_subnets} phpIPAM subnets · ${r.counts.nautobot_prefixes} Nautobot prefixes · ${r.counts.nautobot_addresses} assigned addresses` },
+          { key: "drift", label: "Drift", value: String(s.errors), tone: s.errors ? "bad" : "ok", detail: "missing on one side, or a different VRF, VLAN or gateway" },
+          { key: "warn", label: "Warnings", value: String(s.warnings), tone: s.warnings ? "warn" : "ok", detail: "names that differ, gateways not flagged, VLANs outside the plan" },
+          { key: "flight", label: "In flight", value: String(s.in_flight), detail: "differences of a request still running: phpIPAM is written first and released last" },
+        ]} />
+        <div className="rec-grid">
+          <div className="table-wrap"><table className="table rec-checks">
+            <thead><tr><th>Check</th><th>Match</th><th></th></tr></thead>
+            <tbody>{r.checks.map((c) => (
+              <tr key={c.key}><td>{c.label}</td><td className="mono small">{c.matched}/{c.total}</td>
+                <td>{c.errors ? <span className="pill s-failed">{c.errors} drift</span> : c.warnings ? <span className="pill s-submitted">{c.warnings} warning{c.warnings > 1 ? "s" : ""}</span>
+                  : c.in_flight ? <span className="pill s-running">{c.in_flight} in flight</span> : <span className="pill s-done">in sync</span>}</td></tr>))}</tbody>
+          </table></div>
+          <div className="table-wrap">
+            {issues.length === 0 ? <div className="empty"><Icon name="check" size={28} /><strong>No differences</strong><div className="mute">phpIPAM and Nautobot agree on everything compared.</div></div> : (
+              <table className="table rec-issues">
+                <thead><tr><th></th><th>Object</th><th>Difference</th><th>phpIPAM</th><th>Nautobot</th></tr></thead>
+                <tbody>{issues.map((i, n) => (
+                  <tr key={n}>
+                    <td><span className={`pill ${SEV[i.severity][0]}`}>{SEV[i.severity][1]}</span></td>
+                    <td><span className="mono small">{i.object}</span><div className="small mute">{i.check}</div></td>
+                    <td className="small" title={KIND[i.kind]}>{i.detail}{i.requests.length > 0 && <> · {i.requests.map((q) => <Link key={q} to={`/requests/${q}`}>#{q} </Link>)}</>}</td>
+                    <td className="mono small">{i.phpipam ?? <span className="mute">—</span>}</td>
+                    <td className="mono small">{i.nautobot ?? <span className="mute">—</span>}</td>
+                  </tr>))}</tbody>
+              </table>)}
+          </div>
+        </div>
+        <p className="small mute rec-note">Read-only: differences are reported, not repaired. {r.ignored.length > 0 && <>Not compared: {r.ignored.map((x) => x.object).join(", ")} (phpIPAM containers, allocation pools that Nautobot holds the children of).</>}</p>
+      </>}
+    </Card>
+  );
+}
+
 function fmtUptime(s: number) {
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
@@ -161,6 +224,8 @@ export default function FabricPage() {
         <Card title={<><Icon name="chart" />Design KPIs</>} actions={<span className="small mute">computed from the cabling and the plan in Nautobot</span>}>
           <KpiGrid kpis={f.kpis} />
         </Card>
+
+        <SourcesOfTruth />
 
         <Card title={<><Icon name="network" />Topology</>} actions={<span className="small mute">{f.counts.links} cables · {f.protocols.underlay} · {f.protocols.overlay}</span>}>
           <Topology f={f} />

@@ -539,3 +539,72 @@ class FabricDashboardTests(TestCase):
     def test_api_requires_login(self):
         self.assertEqual(self.client.get("/api/fabric").status_code, 401)
         self.assertEqual(self.client.get("/api/fabric/health").status_code, 401)
+
+
+class ReconcileTests(TestCase):
+    """phpIPAM against Nautobot, on fake data: each kind of drift is found, expected differences are not."""
+
+    def _data(self):
+        ip, net = ipaddress.ip_address, ipaddress.ip_network
+        P = {"vrfs": {"web", "app"},
+             "vlans": {10: {"name": "web-10", "description": ""}, 41: {"name": "vlan_41_web", "description": "request #6"}, 110: {"name": "transit-web", "description": ""}},
+             "subnets": {net("172.16.0.0/16"): {"id": 1, "vrf": None, "vlan": None, "description": "", "container": True},
+                         net("172.16.10.0/24"): {"id": 2, "vrf": "web", "vlan": 10, "description": "", "container": False},
+                         net("172.16.0.0/24"): {"id": 3, "vrf": "web", "vlan": 41, "description": "request #6", "container": False},
+                         net("172.16.110.0/28"): {"id": 4, "vrf": "web", "vlan": 110, "description": "", "container": False},
+                         net("10.255.10.0/24"): {"id": 5, "vrf": "web", "vlan": None, "description": "", "container": False}},
+             "addresses": {ip("172.16.10.1"): {"subnet": net("172.16.10.0/24"), "gateway": True, "description": "", "hostname": ""},
+                           ip("172.16.0.1"): {"subnet": net("172.16.0.0/24"), "gateway": True, "description": "", "hostname": ""},
+                           ip("172.16.10.11"): {"subnet": net("172.16.10.0/24"), "gateway": False, "description": "web1", "hostname": ""}}}
+        N = {"ctx": {"evpn": {"vrfs": [{"name": "web", "l3vlan": 4010, "probe": "10.255.10"}, {"name": "app", "l3vlan": 4020}],
+                              "vlans": [{"vlan": 10, "vrf": "web", "gateway": "172.16.10.1/24"}, {"vlan": 41, "vrf": "web", "gateway": "172.16.0.1/24"}],
+                              "transit": [{"vlan": 110, "vrf": "web", "subnet": "172.16.110.0/28"}]}, "lb_peerings": []},
+             "vrfs": {"web", "app"},
+             "vlans": {10: {"name": "web-10", "description": ""}, 41: {"name": "vlan_41_web", "description": "request #6"}, 110: {"name": "transit-web", "description": ""}},
+             "prefixes": {net("172.16.10.0/24"): {"vrf": "web", "vlan": 10, "description": ""}, net("172.16.0.0/24"): {"vrf": "web", "vlan": 41, "description": "request #6"},
+                          net("172.16.110.0/28"): {"vrf": "web", "vlan": 110, "description": ""}},
+             "addresses": {ipaddress.ip_interface("172.16.10.11/24"): "web1"}}
+        return P, N
+
+    def run_with(self, P, N, open_reqs=()):
+        from . import reconcile
+        with mock.patch.object(reconcile, "_phpipam", return_value=P), mock.patch.object(reconcile, "_nautobot", return_value=N), \
+             mock.patch.object(reconcile, "_open_requests", return_value=set(open_reqs)):
+            return reconcile.report(force=True)
+
+    def issues(self, r):
+        return {(c["key"], i["object"], i["kind"], i["severity"]) for c in r["checks"] for i in c["issues"]}
+
+    def test_in_sync(self):
+        r = self.run_with(*self._data())
+        self.assertEqual(self.issues(r), set()); self.assertTrue(r["summary"]["in_sync"])
+        self.assertEqual([x["object"] for x in r["ignored"]], ["172.16.0.0/16"])      # the container is not drift
+
+    def test_drift_found(self):
+        P, N = self._data(); net, ip = ipaddress.ip_network, ipaddress.ip_address
+        P["subnets"][net("172.16.0.0/24")]["vrf"] = "app"                                    # VRF edited by hand in phpIPAM
+        P["subnets"][net("172.16.9.0/24")] = {"id": 9, "vrf": "web", "vlan": None, "description": "", "container": False}   # only in phpIPAM
+        del P["addresses"][ip("172.16.10.1")]                                                # the gateway released
+        P["vlans"][10]["name"] = "web"                                                       # a name difference: a warning
+        del N["prefixes"][net("172.16.110.0/28")]                                            # the plan's transit lost its prefix
+        del P["addresses"][ip("172.16.10.11")]                                               # an assigned address not reserved
+        r = self.run_with(P, N)
+        got = self.issues(r)
+        for want in [("prefixes", "172.16.0.0/24", "mismatch", "error"), ("prefixes", "172.16.9.0/24", "only_phpipam", "error"),
+                     ("gateways", "VLAN 10 gateway 172.16.10.1", "only_nautobot", "error"), ("vlans", "VLAN 10", "mismatch", "warning"),
+                     ("prefixes", "172.16.110.0/28", "only_phpipam", "error"), ("plan", "VLAN 110", "mismatch", "error"),
+                     ("addresses", "172.16.10.11/24", "only_nautobot", "error")]:
+            self.assertIn(want, got)
+        self.assertFalse(r["summary"]["in_sync"])
+
+    def test_open_request_is_in_flight(self):
+        P, N = self._data()
+        del N["prefixes"][ipaddress.ip_network("172.16.0.0/24")]          # request #6 has reserved phpIPAM, not yet written Nautobot
+        r = self.run_with(P, N, open_reqs={6})
+        self.assertIn(("prefixes", "172.16.0.0/24", "only_phpipam", "in_flight"), self.issues(r))
+        self.assertTrue(r["summary"]["in_sync"])                         # in flight is not drift
+        r = self.run_with(P, N, open_reqs=set())
+        self.assertIn(("prefixes", "172.16.0.0/24", "only_phpipam", "error"), self.issues(r))
+
+    def test_api_requires_login(self):
+        self.assertEqual(self.client.get("/api/fabric/reconcile").status_code, 401)

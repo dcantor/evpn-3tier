@@ -2,6 +2,18 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.20.0] - 2026-11-09
+
+### Added
+- phpIPAM ↔ Nautobot reconciliation (read-only; it reports, it repairs nothing): `workflows/reconcile.py`,
+  `GET /api/fabric/reconcile`, `manage.py e3t_reconcile [--json]` (exit 0 in sync, 1 drift, 2 a source did not
+  answer), and a *Sources of truth* card on the Fabric Dashboard. Compares VRFs; VLAN IDs and names; every subnet /
+  prefix with its VRF and VLAN (phpIPAM's containers aside); phpIPAM's probe subnets against the plan's probe bases;
+  the plan's gateways reserved and flagged in phpIPAM; every address Nautobot assigns reserved in phpIPAM; and
+  Nautobot's config-context plan against its own VLAN and prefix objects. Differences of a request still open are
+  shown as in flight, not drift. First run: 117/120, no drift; 3 warnings (VLANs 10, 20, 30 are named web / app / db
+  in phpIPAM and web-10 / app-20 / db-30 in Nautobot, from the initial loads).
+
 ## [0.19.0] - 2026-11-09
 
 ### Added
