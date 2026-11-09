@@ -17,11 +17,11 @@ class Workflow:
 
 CATALOG = [
     Workflow("add-vlan", "Add a VLAN to the fabric",
-             "A new L2 segment with an anycast gateway, in one of the tier VRFs, on the leaves (and the borders if asked).",
+             "A new L2 segment with an anycast gateway in one of the tier VRFs, on the leaves (and the borders if asked). You pick the VRF; the app picks the next unused VLAN ID and a free /24 from phpIPAM.",
              ["Nautobot: the VLAN, its VNI and gateway in the evpn-3tier plan",
               "evpn-3tier-switches pipeline: VLAN-to-VNI, the anycast gateway and the VLAN on the leaves / borders",
               "phpIPAM: the subnet and its gateway reservation"],
-             "AddVlanForm", "Add VLAN {vlan_id} ({name}) to VRF {vrf}",
+             "AddVlanForm", "Add VLAN {vlan_id} to VRF {vrf} ({subnet})",
              (("nautobot", "Nautobot"), ("switches", "Switches pipeline"), ("phpipam", "phpIPAM"), ("checks", "Device checks"))),
     Workflow("lb-peering", "Set up a load balancer to peer with the fabric",
              "A load balancer on the fabric announcing its VIP prefixes to the switch pair it is dual-homed to, over eBGP (BFD optional), in its VRF.",

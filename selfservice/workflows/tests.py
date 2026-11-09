@@ -48,6 +48,35 @@ class AddVlanFormTests(TestCase):
     def test_gateway_must_be_a_host(self, _m):
         f = F.AddVlanForm({**VLAN_OK, "gateway": "172.16.40.0/24"}); self.assertFalse(f.is_valid())
 
+    def test_name_is_computed(self, _m):
+        f = F.AddVlanForm({**VLAN_OK, "name": "ignored"}); self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual(f.params()["name"], "40-app")
+
+    def test_gateway_is_first_host(self, _m):
+        f = F.AddVlanForm({**VLAN_OK, "gateway": "172.16.40.254/24"}); self.assertFalse(f.is_valid())
+        self.assertIn("first host", str(f.errors["gateway"]))
+
+    def test_open_request_holds_its_vlan_and_subnet(self, _m):
+        u = User.objects.create_user("h", password="h-password-123")
+        WorkflowRequest.objects.create(workflow="add-vlan", title="t", requested_by=u, status="submitted",
+                                       parameters={"vlan_id": 40, "subnet": "172.16.40.0/24"})
+        f = F.AddVlanForm(VLAN_OK); self.assertFalse(f.is_valid())
+        self.assertIn("open request", str(f.errors["vlan_id"])); self.assertIn("request #", str(f.errors["gateway"]))
+
+    def test_allocation(self, _m):
+        import ipaddress as I
+        from . import allocate
+        u = User.objects.create_user("h", password="h-password-123")
+        WorkflowRequest.objects.create(workflow="add-vlan", title="t", requested_by=u, status="approved",
+                                       parameters={"vlan_id": 11, "subnet": "172.16.0.0/24"})
+        lab = {**LAB, "tier_vlans": [{"vlan": 10, "vrf": "web", "gateway": "172.16.10.1/24", "on": "leaves"}]}
+        with mock.patch("workflows.labmodel.model", return_value=lab), \
+             mock.patch.object(allocate, "ipam_vlans", return_value={12}), \
+             mock.patch.object(allocate, "free_subnets", return_value=[I.ip_network("172.16.0.0/24"), I.ip_network("172.16.1.0/24")]):
+            a = allocate.add_vlan("db")
+        # 11 is held by the open request, 12 is in phpIPAM; 172.16.0.0/24 is held too
+        self.assertEqual((a["vlan_id"], a["vni"], a["name"], a["subnet"], a["gateway"]), (13, 10013, "13-db", "172.16.1.0/24", "172.16.1.1/24"))
+
     def test_outside_vrf_not_offered(self, _m):
         f = F.AddVlanForm({**VLAN_OK, "vrf": "outside"}); self.assertFalse(f.is_valid()); self.assertIn("vrf", f.errors)
 
@@ -94,7 +123,7 @@ class RequestFlowTests(TestCase):
     def test_submit_records_request_and_event(self, _m):
         r = self.submit(self.alice); self.assertEqual(r.status_code, 302)
         wr = WorkflowRequest.objects.get()
-        self.assertEqual((wr.title, wr.status, wr.requested_by), ("Add VLAN 40 (app-backup) to VRF app", "submitted", self.alice))
+        self.assertEqual((wr.title, wr.status, wr.requested_by), ("Add VLAN 40 to VRF app (172.16.40.0/24)", "submitted", self.alice))
         self.assertEqual(wr.parameters["vni"], 10040)
         self.assertEqual(list(wr.events.values_list("kind", flat=True)), ["submitted"])
 

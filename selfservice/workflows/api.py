@@ -47,15 +47,21 @@ def detail(r, user):
 
 
 def form_schema(form):
-    """A Django form as the front end renders it: fields in order, types, limits, choices, help."""
-    out = []
+    """A Django form as the front end renders it: fields in order, types, limits, choices, help — and the form's `ui`
+    hints (a field allocated by a button, a field filled by the allocation) and `computed` read-only fields."""
+    out = []; ui = getattr(form, "ui", {})
     for name, f in form.fields.items():
         w = type(f.widget).__name__
         kind = {"IntegerField": "number", "BooleanField": "checkbox", "ChoiceField": "select"}.get(type(f).__name__, "textarea" if w == "Textarea" else "text")
         out.append({"name": name, "label": str(f.label or name.replace("_", " ").capitalize()), "type": kind, "required": f.required,
                     "help": str(f.help_text or ""), "initial": form.get_initial_for_field(f, name),
                     "choices": [{"value": v, "label": str(l)} for v, l in getattr(f, "choices", [])] if kind == "select" else None,
-                    "min": getattr(f, "min_value", None), "max": getattr(f, "max_value", None), "max_length": getattr(f, "max_length", None)})
+                    "min": getattr(f, "min_value", None), "max": getattr(f, "max_value", None), "max_length": getattr(f, "max_length", None),
+                    **({"type": ui[name]["type"], "ui": ui[name]} if name in ui else {})})
+    for c in getattr(form, "computed", []):
+        at = next((i for i, x in enumerate(out) if x["name"] == c["after"]), len(out) - 1) + 1
+        out.insert(at, {"name": c["name"], "label": c["label"], "type": "computed", "required": False, "help": c["help"], "initial": None,
+                        "choices": None, "min": None, "max": None, "max_length": None, "ui": {"template": c["template"]}})
     return out
 
 
@@ -117,6 +123,15 @@ def catalog_form(request, slug: str):
     except Exception as e:                                                    # noqa: BLE001
         raise HttpError(503, f"the form needs the lab model: {type(e).__name__}: {e}")
     return {"slug": wf.slug, "name": wf.name, "summary": wf.summary, "will_do": wf.will_do, "fields": form_schema(form)}
+
+
+@api.get("/catalog/add-vlan/allocate", tags=["catalog"])
+def allocate_vlan(request, vrf: str = ""):
+    """The next unused VLAN ID and a free /24 from phpIPAM (gateway: its first host) — nothing is reserved yet."""
+    from . import allocate
+    try: return allocate.add_vlan(vrf or None)
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(503, f"allocation failed: {type(e).__name__}: {e}")
 
 
 # ---- requests --------------------------------------------------------------------------------------------------------------

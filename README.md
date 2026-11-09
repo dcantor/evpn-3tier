@@ -130,6 +130,12 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   Forms are checked against **Nautobot** (the
   source of truth; lab.conf if Nautobot does not answer): VLAN IDs and VNIs free, subnets inside 172.16.0.0/16 and
   overlapping nothing, private ASNs unused — so what the app added counts as used for the next request.
+- **Add a VLAN — allocated, not typed** (workflows/allocate.py): the requester picks the **VRF** (first) and the span;
+  *Select the next unused VLAN ID* asks the app, which picks the lowest ID above the highest tier VLAN that nothing
+  uses (Nautobot's plan, phpIPAM's VLANs, open requests; its VNI free too) and **phpIPAM's first free /24** under
+  172.16.0.0/16 that overlaps nothing — the **gateway is its first host**. The **name is `<VLAN ID>-<VRF>`** (e.g.
+  `41-app`). Nothing is reserved until the worker writes it: an open request (submitted / approved / running) holds its
+  VLAN and subnet — the next allocation skips them, and submitting re-checks both.
 - **Add a VLAN, executed** (workflows/executors.py, every step idempotent): 1 Nautobot — the VLAN in the evpn-3tier plan
   (config context), the native VLAN and its prefix in the VRF; 2 Gitea — the evpn-3tier-switches pipeline (inventory,
   check, apply, verify), waited for, its run linked; 3 phpIPAM — VLAN, subnet, gateway reservation; 4 the devices — every
@@ -149,7 +155,7 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (31: forms, flows, approval, the log parser,
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (35: forms, allocation, flows, approval, the log parser,
   progress, the API); the front end type-checks in its build (`tsc -b`, strict).
 
 Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift

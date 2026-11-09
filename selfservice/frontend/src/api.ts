@@ -34,9 +34,12 @@ export type Detail = Summary & {
 };
 export type Workflow = { slug: string; name: string; summary: string; will_do: string[]; stages: { key: string; label: string }[] };
 export type Field = {
-  name: string; label: string; type: "text" | "textarea" | "number" | "select" | "checkbox"; required: boolean; help: string;
+  name: string; label: string; type: "text" | "textarea" | "number" | "select" | "checkbox" | "allocate" | "computed"; required: boolean; help: string;
   initial: unknown; choices: { value: string; label: string }[] | null; min: number | null; max: number | null; max_length: number | null;
+  // allocate: a button that asks the server for values (endpoint), filling `fills`; computed: read-only, from a template or the allocation
+  ui?: { button?: string; endpoint?: string; fills?: string[]; depends?: string[]; template?: string; from?: string };
 };
+export type VlanAllocation = { vlan_id: number; vni: number; subnet: string; gateway: string; name: string | null; source: { vlan: string; subnet: string } };
 export type FormSpec = { slug: string; name: string; summary: string; will_do: string[]; fields: Field[] };
 export type Lab = {
   source: string; lab: string; vrfs: string[]; tier_vrfs: string[]; vlans_used: number[]; vnis_used: number[]; asns_used: number[];
@@ -72,6 +75,7 @@ export const api = {
   lab: () => call<Lab>("GET", "/lab"),
   catalog: () => call<Workflow[]>("GET", "/catalog"),
   form: (slug: string) => call<FormSpec>("GET", `/catalog/${slug}/form`),
+  allocate: (endpoint: string, params: Record<string, string>) => call<VlanAllocation>("GET", `${endpoint}?${new URLSearchParams(params)}`),
   requests: (scope: "mine" | "all" | "pending", params: { status?: string; q?: string } = {}) =>
     call<Summary[]>("GET", `/requests?scope=${scope}&${new URLSearchParams(params as Record<string, string>)}`),
   counts: () => call<Record<Status, number>>("GET", "/requests/counts"),

@@ -2,6 +2,16 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0] - 2026-11-09
+
+### Changed
+- *Add a VLAN*: the VRF comes first; the VLAN ID is no longer typed — *Select the next unused VLAN ID* allocates it
+  (lowest free above the tier VLANs; Nautobot, phpIPAM and open requests checked; VNI free) and shows it; the name is
+  `<VLAN ID>-<VRF>`; the gateway / prefix comes from phpIPAM (first free /24 under 172.16.0.0/16), the gateway being the
+  subnet's first host (enforced). Open requests hold their VLAN and subnet in both workflows' validation.
+  New: GET /api/catalog/add-vlan/allocate; form definitions carry `allocate` and `computed` field kinds. Request titles:
+  "Add VLAN 41 to VRF app (172.16.0.0/24)". 35 tests.
+
 ## [0.11.0] - 2026-11-09
 
 ### Added

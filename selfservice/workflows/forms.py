@@ -24,29 +24,43 @@ class RequestForm(forms.Form):
         return {k: v for k, v in self.cleaned_data.items() if k != "reason"}
 
 
+def _clash(net):
+    """What a prefix overlaps: Nautobot's plan, and what open requests hold."""
+    from .allocate import claims
+    return labmodel.overlaps(net) + [f"{n} ({who})" for n, who in claims()[2] if n.overlaps(net)]
+
+
+def _held_vlans():
+    from .allocate import claims
+    v, vni, _ = claims(); return v, vni
+
+
 class AddVlanForm(RequestForm):
-    field_order = ["vlan_id", "name", "vrf", "gateway", "span", "reason"]
-    vlan_id = forms.IntegerField(label="VLAN ID", min_value=2, max_value=4094, help_text="2-4094, not used in the lab. The L2VNI will be 10000 + the VLAN ID.")
-    name = forms.CharField(max_length=31, help_text="lower case, e.g. app-backup")
+    """The requester picks the VRF and the span; the app allocates the VLAN ID (next unused) and the subnet (phpIPAM's
+    first free /24; the gateway is its first host) — allocate.py — and names the VLAN <ID>-<VRF>. The allocated values
+    come back with the request and are checked again here (another request may have taken them meanwhile)."""
+    field_order = ["vrf", "vlan_id", "gateway", "span", "reason"]
     vrf = forms.ChoiceField(label="VRF", help_text="The tier the VLAN belongs to: hosts in it reach other VRFs through the firewalls.")
-    gateway = forms.CharField(label="Gateway / prefix", help_text="The anycast gateway with its prefix length, e.g. 172.16.40.1/24 — inside 172.16.0.0/16, overlapping nothing.")
+    vlan_id = forms.IntegerField(label="VLAN ID", min_value=2, max_value=4094, help_text="Allocated: the next unused VLAN ID. Its L2VNI is 10000 + the VLAN ID.")
+    gateway = forms.CharField(label="Gateway / prefix", help_text="Allocated from phpIPAM: the first free /24 in 172.16.0.0/16; the gateway is its first host address.")
     span = forms.ChoiceField(choices=[("leaves", "every leaf"), ("leaves+borders", "every leaf and both border leaves")], initial="leaves",
                              help_text="Borders too when something attached to them (a load balancer, a firewall) needs the VLAN.")
+    # how the React front end renders the fields (api.form_schema): the VLAN ID is a button, the rest follow from it
+    ui = {"vlan_id": {"type": "allocate", "button": "Select the next unused VLAN ID", "endpoint": "/catalog/add-vlan/allocate",
+                      "fills": ["vlan_id", "gateway"], "depends": ["vrf"]},
+          "gateway": {"type": "computed", "from": "allocation"}}
+    computed = [{"name": "name", "label": "Name", "template": "{vlan_id}-{vrf}", "help": "Automatic: the VLAN ID and the VRF.", "after": "vlan_id"}]
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         m = _model(); self.fields["vrf"].choices = [(v, v) for v in m["tier_vrfs"]]
 
     def clean_vlan_id(self):
-        v = self.cleaned_data["vlan_id"]; m = _model()
-        if v in m["vlans_used"]: raise forms.ValidationError(f"VLAN {v} is in use (used: {', '.join(map(str, m['vlans_used']))}).")
-        if 10000 + v in m["vnis_used"]: raise forms.ValidationError(f"VNI {10000 + v} is in use.")
+        v = self.cleaned_data["vlan_id"]; m = _model(); held, held_vni = _held_vlans()
+        if v in m["vlans_used"]: raise forms.ValidationError(f"VLAN {v} is in use (used: {', '.join(map(str, m['vlans_used']))}). Select the next unused one again.")
+        if v in held: raise forms.ValidationError(f"VLAN {v} is held by an open request. Select the next unused one again.")
+        if 10000 + v in m["vnis_used"] or 10000 + v in held_vni: raise forms.ValidationError(f"VNI {10000 + v} is in use.")
         return v
-
-    def clean_name(self):
-        n = self.cleaned_data["name"].strip().lower()
-        if not SLUG.match(n): raise forms.ValidationError("Lower-case letters, digits and dashes, starting with a letter.")
-        return n
 
     def clean_gateway(self):
         g = self.cleaned_data["gateway"].strip()
@@ -54,13 +68,15 @@ class AddVlanForm(RequestForm):
         except ValueError: raise forms.ValidationError("An IPv4 address with a prefix length, e.g. 172.16.40.1/24.")
         net = gw.network
         if gw.version != 4 or not 16 <= net.prefixlen <= 29: raise forms.ValidationError("IPv4, a prefix between /16 and /29.")
-        if gw.ip in (net.network_address, net.broadcast_address): raise forms.ValidationError("The gateway must be a host address of the subnet.")
+        if gw.ip != net.network_address + 1: raise forms.ValidationError(f"The gateway is the subnet's first host address: {net.network_address + 1}/{net.prefixlen}.")
         if not net.subnet_of(labmodel.FABRIC_SUPERNET): raise forms.ValidationError(f"Inside {labmodel.FABRIC_SUPERNET} (the fabric's tier space).")
-        if clash := labmodel.overlaps(net): raise forms.ValidationError(f"{net} overlaps {', '.join(clash)}.")
+        if clash := _clash(net): raise forms.ValidationError(f"{net} overlaps {', '.join(clash)}. Select the next unused VLAN again (a new subnet comes with it).")
         return str(gw)
 
     def params(self):
-        p = super().params(); p["vni"] = 10000 + p["vlan_id"]; p["subnet"] = str(ipaddress.ip_interface(p["gateway"]).network); return p
+        p = super().params()
+        p["name"] = f"{p['vlan_id']}-{p['vrf']}"
+        p["vni"] = 10000 + p["vlan_id"]; p["subnet"] = str(ipaddress.ip_interface(p["gateway"]).network); return p
 
 
 class LbPeeringForm(RequestForm):
@@ -91,16 +107,16 @@ class LbPeeringForm(RequestForm):
         return a
 
     def clean_peering_vlan(self):
-        v = self.cleaned_data["peering_vlan"]; m = _model()
-        if v in m["vlans_used"]: raise forms.ValidationError(f"VLAN {v} is in use.")
-        if 10000 + v in m["vnis_used"]: raise forms.ValidationError(f"VNI {10000 + v} is in use.")
+        v = self.cleaned_data["peering_vlan"]; m = _model(); held, held_vni = _held_vlans()
+        if v in m["vlans_used"] or v in held: raise forms.ValidationError(f"VLAN {v} is in use.")
+        if 10000 + v in m["vnis_used"] or 10000 + v in held_vni: raise forms.ValidationError(f"VNI {10000 + v} is in use.")
         return v
 
     def _net(self, s, what):
         try: net = ipaddress.ip_network(s.strip(), strict=True)
         except ValueError: raise forms.ValidationError(f"{what}: '{s.strip()}' is not a prefix (network address / length).")
         if net.version != 4 or not net.subnet_of(labmodel.FABRIC_SUPERNET): raise forms.ValidationError(f"{what}: {net} must be IPv4 inside {labmodel.FABRIC_SUPERNET}.")
-        if clash := labmodel.overlaps(net): raise forms.ValidationError(f"{what}: {net} overlaps {', '.join(clash)}.")
+        if clash := _clash(net): raise forms.ValidationError(f"{what}: {net} overlaps {', '.join(clash)}.")
         return net
 
     def clean_peering_subnet(self):
