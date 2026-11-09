@@ -53,10 +53,10 @@ def form_schema(form):
     out = []; ui = getattr(form, "ui", {})
     for name, f in form.fields.items():
         w = type(f.widget).__name__
-        kind = {"IntegerField": "number", "BooleanField": "checkbox", "ChoiceField": "select"}.get(type(f).__name__, "textarea" if w == "Textarea" else "text")
+        kind = {"IntegerField": "number", "BooleanField": "checkbox", "ChoiceField": "select", "MultipleChoiceField": "multiselect"}.get(type(f).__name__, "textarea" if w == "Textarea" else "text")
         out.append({"name": name, "label": str(f.label or name.replace("_", " ").capitalize()), "type": kind, "required": f.required,
                     "help": str(f.help_text or ""), "initial": form.get_initial_for_field(f, name),
-                    "choices": [{"value": v, "label": str(l)} for v, l in getattr(f, "choices", [])] if kind == "select" else None,
+                    "choices": [{"value": v, "label": str(l)} for v, l in getattr(f, "choices", [])] if kind in ("select", "multiselect") else None,
                     "min": getattr(f, "min_value", None), "max": getattr(f, "max_value", None), "max_length": getattr(f, "max_length", None),
                     **({"type": ui[name]["type"], "ui": ui[name]} if name in ui else {})})
     for c in getattr(form, "computed", []):

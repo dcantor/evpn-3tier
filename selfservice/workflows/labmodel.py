@@ -18,7 +18,8 @@ log = logging.getLogger(__name__)
 
 QUERY = """{ config_contexts(name: ["evpn-3tier"]) { data }
   devices(location: ["evpn-3tier"]) { name local_config_context_data role { name } rack { name }
-    interfaces { name vrf { name } ip_addresses { address } cable_peer_interface { device { name } } } }
+    interfaces { name vrf { name } ip_addresses { address } cable_peer_interface { name device { name } } cable { label }
+      enabled mode description untagged_vlan { vid } tagged_vlans { vid } } }
   vlans(vlan_group: ["evpn-3tier"]) { vid name } }"""
 
 
@@ -40,7 +41,14 @@ def _from_nautobot():
                       # the tier address (the bond0.<VLAN> with an address) and the host number it is made from
                       **next(({"vlan": int(i["name"].split(".")[1]), "address": i["ip_addresses"][0]["address"]} for i in ifs
                               if re.match(r"^bond0\.\d+$", i["name"]) and i.get("ip_addresses")), {}),
-                      "hostnum": x["local_config_context_data"].get("hostnum")})
+                      "hostnum": x["local_config_context_data"].get("hostnum"),
+                      # the switch ports (Port Provisioning): cabled (fabric / access, with the peer) or spare, and their intent
+                      "ifs": [{"name": i["name"], "kind": (i.get("cable") or {}).get("label"),
+                               "peer": strip(i["cable_peer_interface"]["device"]["name"]) if i.get("cable_peer_interface") else None,
+                               "peer_port": (i.get("cable_peer_interface") or {}).get("name"), "enabled": i.get("enabled", True) is not False,
+                               "mode": (i.get("mode") or "").lower() or None, "untagged_vlan": (i.get("untagged_vlan") or {}).get("vid"),
+                               "tagged_vlans": sorted(v["vid"] for v in i.get("tagged_vlans") or []), "description": i.get("description") or ""}
+                              for i in ifs if re.match(r"^eth[1-9]\d*$", i["name"])]})
     ctx = {**ctx, "_vlan_names": {v["vid"]: v["name"] for v in d.get("vlans") or []}}
     return ctx, ev, nodes, "Nautobot"
 
@@ -75,6 +83,11 @@ def model():
            for n in sorted(nodes, key=lambda n: n["idx"]) if n["role"] == "lb"}
     # removable VLANs: the plan's tier VLANs, unless the lab's design (lab.conf) has them, hosts sit in them, or they are
     # the last VLAN of their VRF (its L3 config on the switches would go with it)
+    ports = [{"switch": n["name"], **p} for n in leaves for p in sorted(n.get("ifs") or [], key=lambda p: int(p["name"][3:]))]
+    on_ports = {}
+    for p in ports:
+        for v in ([p["untagged_vlan"]] if p["mode"] == "access" and p["untagged_vlan"] else []) + (p["tagged_vlans"] if p["mode"] == "tagged" else []):
+            on_ports.setdefault(v, []).append(f"{p['switch']} {p['name']}")
     base = _base_vlans()
     names = ctx.get("_vlan_names", {})
     per_vrf = {}
@@ -83,6 +96,7 @@ def model():
     for v in sorted(ev["vlans"], key=lambda v: v["vlan"]):
         hosts = sorted(n["name"] for n in nodes if v["vlan"] in (n.get("vlans") or []))
         why = ("part of the lab's design (lab.conf)" if v["vlan"] in base else f"hosts attached: {', '.join(hosts)}" if hosts
+               else f"provisioned on {', '.join(on_ports[v['vlan']])}" if v["vlan"] in on_ports
                else f"the last VLAN of VRF {v['vrf']}" if per_vrf[v["vrf"]] == 1 else None)
         vlans.append({"vlan": v["vlan"], "name": names.get(v["vlan"]), "vrf": v["vrf"], "vni": v["vni"], "gateway": v["gateway"],
                       "subnet": str(ipaddress.ip_interface(v["gateway"]).network), "on": v["on"], "blocked": why})
@@ -101,6 +115,7 @@ def model():
         "hosts": [{k: n.get(k) for k in ("name", "role", "vrf", "vlan", "vlans", "address", "hostnum", "peers")}
                   for n in sorted(nodes, key=lambda n: n["idx"]) if n["role"] in ("lb", "web", "app", "db")],
         "fw_policy": ctx.get("fw_policy", []), "web_vip": ctx.get("web_vip"),
+        "ports": ports,
     }
     _cache.update(t=time.time(), v=m)
     return m

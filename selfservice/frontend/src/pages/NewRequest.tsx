@@ -69,6 +69,15 @@ function Input({ f, value, onChange, error }: { f: Field; value: unknown; onChan
       <option value="" disabled>Choose…</option>
       {f.choices?.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
     </select>);
+  else if (f.type === "multiselect") {
+    const sel = new Set(Array.isArray(value) ? (value as string[]) : []);
+    const flip = (v: string) => { const n = new Set(sel); if (n.has(v)) n.delete(v); else n.add(v); onChange([...n]); };
+    control = (
+      <div className="multi" id={id} role="group" aria-describedby={`${id}-h`}>
+        {f.choices?.map((c) => (
+          <button type="button" key={c.value} className={`chip ${sel.has(c.value) ? "on" : ""}`} aria-pressed={sel.has(c.value)} onClick={() => flip(c.value)}>{c.label}</button>))}
+      </div>);
+  }
   else if (f.type === "checkbox") return (
     <div className={`field check ${error ? "has-err" : ""}`}>
       <label><input type="checkbox" id={id} checked={!!value} onChange={(e) => onChange(e.target.checked)} /> {f.label}</label>
@@ -103,7 +112,7 @@ export default function NewRequest() {
     api.form(slug).then((s) => {
       setSpec(s);
       setValues(Object.fromEntries(s.fields.filter((f) => f.type !== "computed" || !f.ui?.template)
-        .map((f) => [f.name, f.initial ?? (f.type === "checkbox" ? false : "")])));
+        .map((f) => [f.name, f.initial ?? (f.type === "checkbox" ? false : f.type === "multiselect" ? [] : "")])));
     }).catch((e) => setLoadErr(e.message));
   }, [slug]);
 

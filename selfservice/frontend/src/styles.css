@@ -385,6 +385,7 @@ a.btn[aria-disabled="true"] { opacity: .55; cursor: default; }
 .health-wrap { margin-top: 14px; }
 .fab-last { margin: 12px 0 0; }
 .db-bar .search { min-width: 240px; }
+.multi { display: flex; flex-wrap: wrap; gap: 6px; }
 .db-table td { vertical-align: top; }
 .db-table .tag { margin-bottom: 2px; }
 .pill.k-Fabric, .pill.t-Tier { background: var(--accent-soft); color: var(--accent); }

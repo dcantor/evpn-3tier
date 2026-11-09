@@ -28,7 +28,8 @@ QUERY = """query {
     name local_config_context_data
     role { name } rack { name } platform { name } primary_ip4 { address }
     interfaces {
-      name description mac_address mtu
+      name description mac_address mtu enabled mode
+      untagged_vlan { vid } tagged_vlans { vid }
       vrf { name }
       ip_addresses { address }
       cable { label }
@@ -66,7 +67,11 @@ def model(ctx, devices):
         n = {"name": name, "role": role, "idx": loc["idx"], "mgmt_ip": dv["primary_ip4"]["address"].split("/")[0], "console": loc["console"],
              "asn": loc.get("asn"), "loopback": lo, "rack": dv["rack"]["name"], "domain": dv["name"], "platform": dv["platform"]["name"], "ports": []}
         for i in sorted((i for i in dv["interfaces"] if ETH.match(i["name"])), key=lambda i: int(ETH.match(i["name"])[1])):
-            p = {"name": i["name"], "mac": (i["mac_address"] or "").lower(), "kind": None, "peer": None, "peer_port": None}
+            p = {"name": i["name"], "mac": (i["mac_address"] or "").lower(), "kind": None, "peer": None, "peer_port": None,
+                 # the port's intent (self-service Port Provisioning): admin state, access (one untagged VLAN) or trunk (tagged VLANs)
+                 "enabled": i.get("enabled", True) is not False, "mode": (i.get("mode") or "").lower() or None,
+                 "untagged_vlan": (i.get("untagged_vlan") or {}).get("vid"), "tagged_vlans": sorted(v["vid"] for v in i.get("tagged_vlans") or []),
+                 "description": i.get("description") or ""}
             if i["name"] == "eth0": p["kind"] = "oob"
             elif i["cable"]:
                 peer = i["cable_peer_interface"]

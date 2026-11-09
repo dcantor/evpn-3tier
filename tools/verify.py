@@ -50,8 +50,11 @@ def fabric(n):
     out.append((f"{n['name']}: BFD {len(bfd) - len(bdown)}/{len(bfd)} up", bfd and not bdown, f"down: {bdown}"))
     if n["role"] in ("leaf", "border"):
         es = {e["esi"]: e for e in vtysh_json(n["name"], "show evpn es", inv) or []}
-        mine = [s for s in inv["evpn"]["segments"] if any(l["switch"] == n["name"] for l in s["legs"])]
-        peer_lo = {s["es"]: [N[l["switch"]]["loopback"] for l in s["legs"] if l["switch"] != n["name"]] for s in mine}
+        # a leg disabled on purpose (Port Provisioning: the port's enabled flag in Nautobot's model) is not expected up: this
+        # switch skips that segment, its partner does not expect it as a remote VTEP
+        def leg_on(l): return next((p.get("enabled", True) for p in N[l["switch"]]["ports"] if p["name"] == l["port"]), True)
+        mine = [s for s in inv["evpn"]["segments"] if any(l["switch"] == n["name"] and leg_on(l) for l in s["legs"])]
+        peer_lo = {s["es"]: [N[l["switch"]]["loopback"] for l in s["legs"] if l["switch"] != n["name"] and leg_on(l)] for s in mine}
         bad = []
         for s in mine:
             e = next((e for k, e in es.items() if k.endswith(f":{s['es']:02x}") and s["sys_mac"].replace(":", "")[-2:] in k.replace(":", "")), None)

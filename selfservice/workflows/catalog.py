@@ -88,5 +88,15 @@ CATALOG = [
              (("preflight", "Pre-flight checks"), ("phpipam", "phpIPAM reservation"), ("both", "Both VLANs on its leaves"), ("rules", "Firewall rules follow"),
               ("servers", "Servers pipeline: the move"), ("loadbalancers", "Load balancers pipeline"), ("cleanup", "Old VLAN off, verify"),
               ("checks", "Checks and ping test"), ("release", "phpIPAM release"))),
+    Workflow("port", "Port Provisioning",
+             "Enable or disable a leaf port, and set a spare port up as an access port (one VLAN, untagged) or a trunk (the VLANs you choose, tagged). Uplinks to the spines are blocked; a server's bond leg can only be enabled or disabled, never in a way that cuts the server off.",
+             ["pre-flight: never an uplink to a spine; a server's leg is disabled only while its other leg is up (in Nautobot and live)",
+              "Nautobot: the port's admin state, mode (access / tagged), untagged VLAN, tagged VLANs and description — native interface fields",
+              "evpn-3tier-switches pipeline: the port shut or brought up; on a spare port its bridge membership (native-vlan or allowed-vlan) — managed deletions take away what no longer applies — then the whole lab verified",
+              "checks on the leaf: the port's admin state, and its VLANs on the bridge exactly as asked",
+              "ping test from the WAN: every web, app and db VM still answers"],
+             "PortForm", "Port {switch} {port}: {after}",
+             (("preflight", "Pre-flight checks"), ("nautobot", "Nautobot"), ("switches", "Switches pipeline"), ("checks", "Port checks"),
+              ("ping", "Ping test from the WAN"))),
 ]
 BY_SLUG = {w.slug: w for w in CATALOG}

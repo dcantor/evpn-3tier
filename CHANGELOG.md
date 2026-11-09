@@ -2,6 +2,27 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.23.0] - 2026-11-09
+
+### Added
+- Fabric Factory: **Port Provisioning** (a change workflow, approved by an operator). Enable or disable a leaf port; on
+  a spare port choose access (one VLAN, untagged) or trunk (the VLANs to allow, tagged), or no VLANs. Uplinks to the
+  spines are blocked (listed as such, refused by the form and by the worker). A server's bond leg can only be enabled
+  or disabled — disabled only while its other leg is up in Nautobot and live — and its VLAN follows the server. The
+  intent lives in Nautobot's native interface fields (enabled, mode, untagged VLAN, tagged VLANs, description); the
+  switches pipeline renders it (`disable`, bridge `native-vlan` / `allowed-vlan`, managed deletions take away the rest);
+  checks read the port's admin state and the kernel bridge's VLANs; ping test from the WAN. Request forms gain a
+  multi-select field (toggle chips).
+- Spare ports: eth6 and eth7 on every leaf (lab.conf `ROLE_PORTS[leaf]=7`, unwired UDP NICs; each leaf restarted once,
+  one at a time, verify 61/61 after each); in Nautobot, disabled until provisioned.
+- verify: an Ethernet Segment leg disabled on purpose (the port's enabled flag in Nautobot's model) is not expected up.
+  A VLAN provisioned on a port cannot be removed.
+
+### Tested live
+- #34-#38: leaf1 eth6 as a trunk (VLANs 41, 47 tagged on the bridge), then access VLAN 42, then disabled with no VLANs;
+  web1's leg leaf1 eth3 disabled (web1 on leaf2; the pipeline's verify passed) and enabled again; an uplink change
+  refused. Found and fixed: the live bond check read the wrong line of `show interfaces bonding` (it refused safely).
+
 ## [0.22.0] - 2026-11-09
 
 ### Added

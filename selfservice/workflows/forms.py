@@ -376,3 +376,109 @@ class MoveServerForm(RequestForm):
         return {"server": h["name"], "role": h["role"], "vrf": h["vrf"], "hostnum": h["hostnum"],
                 "from_vlan": h["vlan"], "from_address": h["address"], "to_vlan": v["vlan"], "to_name": v["name"],
                 "to_subnet": v["subnet"], "to_address": c["_addr"], "to_gateway": v["gateway"]}
+
+
+# ---- port provisioning --------------------------------------------------------------------------------------------------------
+PORT_STATES = [("enabled", "Enabled"), ("disabled", "Disabled (shut down)")]
+PORT_MODES = [("", "— leave as it is —"), ("access", "Access: one VLAN, untagged"), ("tagged", "Trunk: chosen VLANs, tagged"),
+              ("none", "No VLANs (unprovisioned; the port must be disabled)")]
+UPLINK = "uplinks to the spines carry the whole fabric: they cannot be changed here"
+
+
+def leaf_vlans(m):
+    """The VLANs a leaf port may carry: tier VLANs on the leaves."""
+    return [v for v in m.get("vlans", []) if "leaves" in v["on"]]
+
+
+def port_partner(m, p):
+    """The other leg of a server's bond: same server, the other leaf."""
+    return next((x for x in m.get("ports", []) if x["kind"] == "access" and x["peer"] == p["peer"] and x["switch"] != p["switch"]), None)
+
+
+def port_label(p):
+    state = "enabled" if p["enabled"] else "disabled"
+    if p["kind"] == "fabric": return f"{p['switch']} {p['name']} — uplink to {p['peer']}: blocked"
+    if p["kind"] == "access": return f"{p['switch']} {p['name']} — {p['peer']}'s bond leg ({state})"
+    cfg = (f", access VLAN {p['untagged_vlan']}" if p["mode"] == "access" else f", trunk VLANs {', '.join(map(str, p['tagged_vlans']))}" if p["mode"] == "tagged" else ", no VLANs")
+    return f"{p['switch']} {p['name']} — spare port ({state}{cfg})"
+
+
+def port_summary(state, mode, access, trunk):
+    s = "enabled" if state == "enabled" else "disabled"
+    if mode == "access": s += f", access VLAN {access}"
+    elif mode == "tagged": s += f", trunk VLANs {', '.join(map(str, trunk))}"
+    return s
+
+
+class PortForm(RequestForm):
+    """A leaf port: enable or disable it; on a spare port, make it an access port (one VLAN, untagged) or a trunk (the
+    chosen VLANs, tagged). Uplinks to the spines are refused. A server's bond leg can only be enabled or disabled — and
+    disabled only while its other leg is up, so the server is never cut off; its VLAN follows the server (Move a server)."""
+    field_order = ["port", "state", "mode", "access_vlan", "trunk_vlans", "description", "reason"]
+    port = forms.ChoiceField(label="Port", help_text="Every leaf port. Uplinks to the spines are listed but blocked; border leaves and spines are not offered.")
+    state = forms.ChoiceField(label="Admin state", choices=PORT_STATES)
+    mode = forms.ChoiceField(label="Mode", choices=PORT_MODES, required=False, help_text="Spare ports only. A server's bond leg keeps the VLAN its server tags.")
+    access_vlan = forms.ChoiceField(label="Access VLAN", required=False, help_text="Access mode: the one VLAN, untagged.")
+    trunk_vlans = forms.MultipleChoiceField(label="Trunk VLANs", required=False, help_text="Trunk mode: the VLANs allowed, tagged. Only VLANs the leaves carry.")
+    description = forms.CharField(label="Description", required=False, max_length=60, help_text="What is plugged in (spare ports), e.g. 'backup appliance'.")
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        m = _model()
+        self.fields["port"].choices = [(f"{p['switch']}|{p['name']}", port_label(p)) for p in m.get("ports", [])]
+        vl = [(str(v["vlan"]), f"{v['vlan']} {v['name'] or ''} ({v['vrf']}, {v['subnet']})") for v in leaf_vlans(m)]
+        self.fields["access_vlan"].choices = [("", "—")] + vl
+        self.fields["trunk_vlans"].choices = vl
+
+    def clean(self):
+        c = super().clean()
+        if "port" not in c or "state" not in c: return c
+        m = _model(); sw, name = c["port"].split("|")
+        p = next((x for x in m["ports"] if x["switch"] == sw and x["name"] == name), None)
+        if p is None: raise forms.ValidationError(f"{sw} {name} is not a leaf port in Nautobot.")
+        if p["kind"] == "fabric": raise forms.ValidationError(f"{sw} {name} is an uplink to {p['peer']}: {UPLINK}.")
+        if p["kind"] not in (None, "access"): raise forms.ValidationError(f"{sw} {name} ({p['kind']}) cannot be provisioned here.")
+        enabled = c["state"] == "enabled"; mode = c.get("mode") or ""; access = c.get("access_vlan") or ""; trunk = sorted(int(v) for v in c.get("trunk_vlans") or [])
+        if p["kind"] == "access":
+            if mode or access or trunk:
+                raise forms.ValidationError(f"{sw} {name} is {p['peer']}'s bond leg: its VLAN follows the server — only enable or disable it here (Move a server changes the VLAN).")
+            if not enabled:
+                other = port_partner(m, p)
+                if other is None or not other["enabled"]:
+                    raise forms.ValidationError(f"Disabling {sw} {name} would cut {p['peer']} off: its other leg ({other['switch'] + ' ' + other['name'] if other else 'none'}) is down.")
+            mode, access_v, trunk = p["mode"], p["untagged_vlan"], p["tagged_vlans"]
+        else:
+            if not mode:                                   # keep what the port has
+                mode, access_v, trunk = p["mode"], p["untagged_vlan"], p["tagged_vlans"]
+                if enabled and not mode: raise forms.ValidationError("An enabled spare port needs a mode: access (one VLAN) or trunk (VLANs).")
+            elif mode == "none":
+                if enabled: raise forms.ValidationError("An enabled spare port needs a mode: disable it to take its VLANs away.")
+                if access or trunk: raise forms.ValidationError("No VLANs: leave the access VLAN and the trunk VLANs empty.")
+                mode, access_v, trunk = None, None, []
+            elif mode == "access":
+                if not access: raise forms.ValidationError("Access mode: choose the access VLAN.")
+                if trunk: raise forms.ValidationError("Access mode carries one VLAN: leave the trunk VLANs empty.")
+                access_v, trunk = int(access), []
+            else:
+                if not trunk: raise forms.ValidationError("Trunk mode: choose at least one VLAN.")
+                if access: raise forms.ValidationError("Trunk mode: leave the access VLAN empty (the chosen VLANs are tagged).")
+                access_v = None
+            ok = {v["vlan"] for v in leaf_vlans(m)}
+            bad = [v for v in ([access_v] if mode == "access" else trunk if mode == "tagged" else []) if v not in ok]
+            if bad: raise forms.ValidationError(f"VLAN(s) {', '.join(map(str, bad))} are not on the leaves.")
+        if (enabled, mode or None, access_v if mode == "access" else None, trunk if mode == "tagged" else []) == \
+           (p["enabled"], p["mode"], p["untagged_vlan"] if p["mode"] == "access" else None, p["tagged_vlans"] if p["mode"] == "tagged" else []) \
+           and (c.get("description") or "") in ("", p["description"]):
+            raise forms.ValidationError(f"{sw} {name} is already {port_summary(c['state'], mode, access_v, trunk)}: nothing to change.")
+        if _open("port", switch=sw, port=name).exists(): raise forms.ValidationError(f"An open request already changes {sw} {name}.")
+        c.update(_p=p, _mode=mode or None, _access=access_v if mode == "access" else None, _trunk=trunk if mode == "tagged" else [])
+        return c
+
+    def params(self):
+        c = self.cleaned_data; p = c["_p"]; m = _model(); other = port_partner(m, p) if p["kind"] == "access" else None
+        desc = (c.get("description") or "").strip() or p["description"]
+        return {"switch": p["switch"], "port": p["name"], "kind": "server leg" if p["kind"] == "access" else "spare", "peer": p["peer"],
+                "enabled": c["state"] == "enabled", "mode": c["_mode"], "access_vlan": c["_access"], "trunk_vlans": c["_trunk"], "description": desc,
+                "partner": f"{other['switch']} {other['name']}" if other else None,
+                "before": port_summary("enabled" if p["enabled"] else "disabled", p["mode"], p["untagged_vlan"], p["tagged_vlans"]),
+                "after": port_summary(c["state"], c["_mode"], c["_access"], c["_trunk"])}

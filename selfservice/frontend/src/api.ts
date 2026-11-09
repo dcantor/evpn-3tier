@@ -34,7 +34,7 @@ export type Detail = Summary & {
 };
 export type Workflow = { slug: string; name: string; summary: string; will_do: string[]; stages: { key: string; label: string }[] };
 export type Field = {
-  name: string; label: string; type: "text" | "textarea" | "number" | "select" | "checkbox" | "allocate" | "computed"; required: boolean; help: string;
+  name: string; label: string; type: "text" | "textarea" | "number" | "select" | "multiselect" | "checkbox" | "allocate" | "computed"; required: boolean; help: string;
   initial: unknown; choices: { value: string; label: string }[] | null; min: number | null; max: number | null; max_length: number | null;
   // allocate: a button that asks the server for values (endpoint), filling `fills`; computed: read-only, from a template or the allocation
   ui?: { button?: string; endpoint?: string; fills?: string[]; depends?: string[]; template?: string; from?: string };

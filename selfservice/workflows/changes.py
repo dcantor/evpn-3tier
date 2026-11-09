@@ -350,3 +350,75 @@ def move_server(r, log):
         log(f"phpIPAM: {old_a.ip} already released (a retry)")
     log(f"done: {srv} serves from VLAN {new_v} at {new_a}")
     return {"runs": runs, "ping": pings, "server": srv, "address": str(new_a), "vlan": new_v, "rules_added": [tw for _, tw in twins]}
+
+
+# ---- port provisioning ----------------------------------------------------------------------------------------------------------
+def _bridge_vlans(inv, ssh, leaf, port):
+    """(admin up?, {vid: "untagged"|"tagged"}) of a leaf port, from VyOS and the kernel bridge."""
+    import json as _json
+    _, o = ssh(leaf, f"{OP} show interfaces ethernet {port} brief | tail -1; echo @@; /sbin/bridge -j vlan show dev {port}", inv=inv, timeout=60)
+    head, _, js = o.partition("@@")
+    m_ = re.search(r"\s([uAD])/([uD])(\s|$)", head); sl = m_.group(0).strip() if m_ else "?"
+    try: rows = _json.loads(js.strip() or "[]")
+    except ValueError: rows = []
+    vl = {}
+    for r in rows:
+        for v in r.get("vlans", []):
+            flags = v.get("flags", [])
+            vl[v["vlan"]] = "untagged" if "Egress Untagged" in flags or "PVID" in flags else "tagged"
+    return (not sl.startswith("A") and not sl.startswith("D")), vl, sl
+
+
+def port_config(r, log):
+    p = r.parameters; sw, port = p["switch"], p["port"]
+    nb = Nautobot()
+    # ---- 1 pre-flight ------------------------------------------------------------------------------------------------------
+    log.stage("preflight")
+    dev = nb.one("dcim/devices", name=f"e3t-{sw}"); _check(dev, f"no device e3t-{sw}")
+    itf = nb.one("dcim/interfaces", device_id=dev["id"], name=port); _check(itf, f"{sw} {port} is not in Nautobot — nothing changed")
+    _check(dev["role"] and "leaf" in str(nb.get(f"extras/roles/{dev['role']['id']}").get("name")), f"{sw} is not a leaf — nothing changed")
+    inv, ssh = _lab(); node = next(n for n in inv["nodes"] if n["name"] == sw)
+    kind = next((x.get("kind") for x in node["ports"] if x["name"] == port), None)
+    _check(kind != "fabric", f"{sw} {port} is an uplink to a spine: {F.UPLINK} — nothing changed")
+    _check(kind in (None, "access"), f"{sw} {port} ({kind}) cannot be provisioned — nothing changed")
+    if kind == "access" and not p["enabled"]:
+        other_sw, other_port = p["partner"].split()
+        o_if = nb.one("dcim/interfaces", device_id=nb.one("dcim/devices", name=f"e3t-{other_sw}")["id"], name=other_port)
+        _check(o_if and o_if.get("enabled", True), f"{p['peer']}'s other leg {p['partner']} is disabled in Nautobot: disabling {sw} {port} would cut it off — nothing changed")
+        seg = next(s for s in inv["evpn"]["segments"] if s["node"] == p["peer"])
+        _, o = ssh(other_sw, f"{OP} show interfaces bonding | grep -E '^bond{seg['es']} '", inv=inv, timeout=60)   # the summary line (S/L)
+        _check(" u/u " in f" {o} ", f"{p['peer']}'s other leg ({other_sw} bond{seg['es']}) is not up live: disabling {sw} {port} would cut it off — nothing changed")
+        log(f"pre-flight: {p['peer']} keeps its other leg, {p['partner']} (bond{seg['es']} up on {other_sw})")
+    log(f"pre-flight: {sw} {port} ({'server leg of ' + p['peer'] if kind == 'access' else 'spare port'}) is {p['before']}; it becomes {p['after']}")
+    # ---- 2 Nautobot: the interface's native fields ------------------------------------------------------------------------------
+    log.stage("nautobot")
+    vg = nb.one("ipam/vlan-groups", name=LOCATION)
+    vid_id = lambda v: nb.one("ipam/vlans", vid=v, vlan_group=vg["id"])["id"]                     # noqa: E731
+    want = {"enabled": bool(p["enabled"]), "description": p["description"][:200]}
+    if kind is None:
+        want.update(mode=p["mode"] or "", untagged_vlan=vid_id(p["access_vlan"]) if p["mode"] == "access" else None,
+                    tagged_vlans=[vid_id(v) for v in p["trunk_vlans"]] if p["mode"] == "tagged" else [])
+    nb.patch(f"dcim/interfaces/{itf['id']}", want)
+    log(f"Nautobot: e3t-{sw} {port} — {p['after']}" + (f" ('{p['description']}')" if kind is None else ""))
+    labmodel.invalidate()
+    # ---- 3 the switches pipeline (verify on Nautobot's model: a disabled server leg is expected down) -----------------------------
+    log.stage("switches")
+    run = _pipeline("evpn-3tier-switches", log)
+    # ---- 4 checks on the leaf ---------------------------------------------------------------------------------------------------
+    log.stage("checks")
+    inv, ssh = _lab()
+    up, vl, sl = _bridge_vlans(inv, ssh, sw, port)
+    _check(up == bool(p["enabled"]), f"{sw} {port} is {sl} (admin {'up' if up else 'down'}), not {'enabled' if p['enabled'] else 'disabled'}")
+    if kind is None:
+        tier = {v["vlan"] for v in inv["evpn"]["vlans"]}
+        got = {k: t for k, t in vl.items() if k in tier}
+        want_vl = ({p["access_vlan"]: "untagged"} if p["mode"] == "access" else {v: "tagged" for v in p["trunk_vlans"]} if p["mode"] == "tagged" else {})
+        _check(got == want_vl, f"{sw} {port} carries {got or 'no tier VLANs'}, not {want_vl or 'none'}")
+        log(f"on the leaf: {sw} {port} is {'up' if up else 'shut'} ({sl}); bridge VLANs: " +
+            (", ".join(f"{k} {t}" for k, t in sorted(got.items())) or "none"))
+    else:
+        log(f"on the leaf: {sw} {port} is {'up' if up else 'shut'} ({sl}); {p['peer']} runs on {'both legs' if up else 'its other leg, ' + p['partner']}")
+    # ---- 5 nothing else broke -------------------------------------------------------------------------------------------------
+    log.stage("ping")
+    pings = _ping_from_wan(inv, ssh, [], log)
+    return {"port": f"{sw} {port}", "after": p["after"], "switches_run": run, "ping": pings}

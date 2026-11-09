@@ -419,4 +419,4 @@ def remove_vlan(r, log):
 EXECUTORS = {"remove-vlan": remove_vlan, "add-vlan": add_vlan, "lb-peering": lb_peering}
 from . import changes as _changes                                           # noqa: E402  (changes.py imports this module's helpers)
 EXECUTORS.update({"vlan-span": _changes.vlan_span, "fw-rule": _changes.fw_rule, "fw-rule-remove": _changes.fw_rule_remove,
-                  "move-server": _changes.move_server})
+                  "move-server": _changes.move_server, "port": _changes.port_config})
