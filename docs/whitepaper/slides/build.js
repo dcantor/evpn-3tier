@@ -8,7 +8,8 @@ const IMG = path.join(__dirname, "img");
 const SIZE = { platform: [1012, 624], topology: [1012, 662], evpn: [1012, 498], policy: [1012, 496], request: [1012, 266],
   orchestration: [1012, 624], pipeline: [1012, 256], sequence: [1012, 686], states: [1012, 246], form: [1360, 1464],
   dashboard: [2152, 2090], "nb-devices": [2724, 1880], "nb-prefixes": [2724, 1730], "nb-changelog-crop": [1720, 1064], "nb-graphql": [2752, 1192],
-  "nb-interfaces": [2724, 1144], "nb-vlans": [2724, 1608] };
+  "nb-interfaces": [2724, 1144], "nb-vlans": [2724, 1608],
+  "asn-db": [2160, 2546], "vlan-db": [2160, 2566] };
 const W = 13.333, L = 0.6, R = W - 0.6, CW = R - L; // margins
 const TOP = 1.75, BOT = 6.8;
 
@@ -519,6 +520,28 @@ const TOP = 1.75, BOT = 6.8;
       tb(s, x + 0.95, y + 0.1, w - 1.1, rh - 0.2, h, b, { hs: 15, bs: 12.5, valign: "middle" });
     }
     s.notes("A Tools card on the New request page; read-only, so no approval. The design half is one GraphQL query to Nautobot: devices with roles, models, racks and cabling; the plan's VRFs, VLANs, transit and peerings. KPIs are computed from it: ECMP width is the uplinks per leaf, oversubscription is server-facing over spine-facing bandwidth, dual-homing counts endpoints cabled to two switches. The live half asks every device over SSH with fixed commands (BGP and BFD summaries, EVPN VNIs, show version) and compares: one spine EVPN session per spine link, every leaf with the same VNIs. Both are cached for 30 seconds; the page reloads its design when a request finishes.");
+  }
+
+  // 17c ASN and VLAN databases
+  {
+    const s = content("Automation and orchestration", "The ASN and VLAN databases", "Every AS and every VLAN of the fabric, from Nautobot, searchable, and downloadable as an Excel workbook");
+    const h = BOT - TOP - 0.32;
+    const a = diagram(s, "asn-db", L, TOP, 3.9, h, "The ASN Database: 12 ASNs and 34 BGP sessions, a table of every ASN with devices, router IDs, peers and VRFs");
+    s.text("ASN Database", { x: a.x, y: a.y + a.h + 0.05, w: a.w, h: 0.26, fontSize: 11, color: C.text2, margin: 0 });
+    const v = diagram(s, "vlan-db", a.x + a.w + 0.25, TOP, 3.9, h, "The VLAN Database: 20 VLANs with name, type, VRF, VNI, subnet, gateway, span, hosts and origin");
+    s.text("VLAN Database", { x: v.x, y: v.y + v.h + 0.05, w: v.w, h: 0.26, fontSize: 11, color: C.text2, margin: 0 });
+    const x = v.x + v.w + 0.4, w = R - x;
+    const rows = [["LuNetwork", C.accent1, "ASN Database", "12 ASNs — spines, leaves, borders, firewalls, WAN, load balancers, route target — with devices, router IDs, peers, VRFs; all 34 BGP sessions"],
+      ["LuTable", C.accent3, "VLAN Database", "20 VLANs: tier, firewall transit, LB peering, L3VNI — subnet, gateway, VRF, VNI, where it lives, hosts, and the request that made it"],
+      ["LuDownload", C.accent4, "Excel download", "Built on the server: header row frozen, a filter on every column, numbers as numbers, an About sheet with the source and time"]];
+    const gap = 0.12, rh = (BOT - TOP - 2 * gap) / 3;
+    for (const [i, [g, c, hd, b]] of rows.entries()) {
+      const y = TOP + i * (rh + gap);
+      card(s, x, y, w, rh, c, 90);
+      await badge(s, x + 0.2, y + 0.22, 0.5, g, c);
+      tb(s, x + 0.85, y + 0.12, w - 1.0, rh - 0.2, hd, b, { hs: 14, bs: 11.5, valign: "top" });
+    }
+    s.notes("Two read-only tools next to the Fabric Dashboard. Both read Nautobot's model, the plan the pipelines deploy from, so they are never out of date. The ASN Database groups devices by AS and derives every BGP session of the design from the cabling and the plan: underlay and EVPN on the spine links, firewall transit per VRF, the WAN and the load balancer peerings. The VLAN Database lists every VLAN in the evpn-3tier group, with the self-service request that created it where there is one. Both download as Excel workbooks built with openpyxl.");
   }
 
   // 18 Sequence

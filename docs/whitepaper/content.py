@@ -256,7 +256,7 @@ def body(m):
 
     # 8 ----------------------------------------------------------------------------------------------------------------------
     S.append(f"""<section><h2><span class="n">8</span>Fabric Factory, the self-service app</h2>
-<p class="lead">Users request changes in forms checked against the live lab; operators approve; a worker carries them out while everyone watches. Read-only tools show any device's configuration and state, and the Fabric Dashboard shows the whole fabric at a glance.</p>
+<p class="lead">Users request changes in forms checked against the live lab; operators approve; a worker carries them out while everyone watches. Read-only tools show any device's configuration and state; the Fabric Dashboard shows the whole fabric at a glance; the ASN and VLAN databases list every AS and VLAN, downloadable as Excel.</p>
 <h3>Most fields fill themselves, by design</h3>
 <div class="callout"><b>When a user requests a VLAN, the system fills in most of the form automatically, without being asked.</b> The requester picks only the VRF (and, optionally, the span) and writes a reason. One button, <i>Select the next unused VLAN ID</i>, makes the app choose the next available VLAN ID and the next free subnet, and every value that follows from them. This is deliberate: hand-typed VLAN IDs, VNIs and subnets are where network changes most often go wrong, through a typo, a duplicate ID, or an overlap with a subnet already in use. Values the system allocates come from the sources of truth, cannot be edited in the form, and are checked again at submission and at execution.</div>
 <div class="grid2"><div>{f(13, '<img src="form-allocated.png" alt="The Add a VLAN form after Select the next unused VLAN ID: VLAN 48, VNI 10048, vlan_48_web, 172.16.7.1/24 from phpIPAM" style="width:100%;border:1px solid #d6dbe4;border-radius:2mm">', "The Add a VLAN form after one click. Only the VRF, the span and the reason were chosen by the user.")}</div>
@@ -293,6 +293,13 @@ def body(m):
         ["VLAN IDs in use", "21", "Tier, transit, L3 and peering VLANs, of 4,093"],
         ["172.16.0.0/16 allocated", "4.5%", "Addresses in Nautobot prefixes"]])}
 {f(16, '<img src="fabric-health.png" alt="Live health vs. design: 19/19 devices reachable, 12/12 fabric sessions, BGP 64/64, BFD 64/64, 14/14 VNIs on every leaf, one VyOS version, and a row per device" style="width:82%;display:block;margin:0 auto;border:1px solid #d6dbe4;border-radius:2mm">', "Live health vs. design, checked over read-only SSH: every session up and every leaf carrying the same VNIs.")}
+<h3>The ASN and VLAN databases</h3>
+<p>Two more read-only tools answer the questions asked most often about a fabric: <i>which AS is that</i>, and <i>what is on VLAN 42</i>. Both read Nautobot's model — the same one the pipelines render from — so they are never out of date, and both download as an Excel workbook (built on the server with openpyxl: a bold header row that stays in place, a filter on every column, numbers stored as numbers, and an About sheet saying where and when the data came from).</p>
+{t(["Tool", "Shows", "Excel sheets"], [
+        ["<b>ASN Database</b>", "All 12 ASNs: the spines (65100, shared), each leaf and border, the firewall pair (65200, shared), the WAN (65000), each load balancer (65310, 65320) and the route-target AS (65500, not a BGP speaker). For each: the devices, roles, racks, router IDs, the ASNs it peers with, its sessions and VRFs. Then all 34 BGP sessions of the design: underlay and EVPN on every spine link, firewall transit in every VRF, the WAN, the load balancer peerings — both ends' addresses, the VRF, BFD.", "ASNs, BGP sessions, About"],
+        ["<b>VLAN Database</b>", "All 20 VLANs of the evpn-3tier group: tier VLANs, firewall transit, load balancer peering and the L3VNI VLANs. For each: ID, name, type, VRF, VNI, subnet, gateway, usable addresses, where it lives (every leaf, the borders, the firewalls), its hosts or members, and its origin — the lab's design, or a link to the self-service request that made it.", "VLANs, About"]])}
+{f(17, img("asn-db.png", "The ASN Database: tiles for 12 ASNs, 34 BGP sessions, 3 firewall and load balancer ASNs and private ASN use, then a table of every ASN with kind, devices, router IDs, peers, sessions and VRFs"), "The ASN Database: every AS on the fabric with its devices, router IDs, peers and VRFs; filter by kind or search, and download it as Excel.")}
+{f(18, img("vlan-db.png", "The VLAN Database: tiles for 20 VLANs, 16 subnets, 4 VRFs and 9 VLANs from self-service requests, then a table of VLANs with name, type, VRF, VNI, subnet, gateway, span, hosts and origin"), "The VLAN Database (first rows): each VLAN's subnet, gateway, VRF and VNI, where it lives, its hosts, and the request that made it.")}
 <h3>Validation and allocation</h3>
 <p>Forms are generated from server-side definitions and validated against a live model of the lab built from Nautobot (falling back to lab.conf): VLAN IDs, VNIs, ASNs and overlapping subnets already in use are refused, including those held by other open requests. The VLAN allocator picks the lowest unused ID above the highest tier VLAN, skipping anything in Nautobot, phpIPAM or an open request, and asks phpIPAM for its first free /24 under 172.16.0.0/16 that overlaps nothing. Values are re-checked at submission and again at execution.</p>
 <h3>Architecture</h3>
@@ -309,6 +316,8 @@ def body(m):
         ["GET /api/requests/{id}/pipelines/…/log", "A pipeline step's whole log, read live from Gitea"],
         ["GET /api/devices, …/config, …/state, /api/devices-configs.zip", "Device list; configuration; live state by category; a zip of configurations"],
         ["GET /api/fabric, /api/fabric/health", "Fabric Dashboard: the design and its KPIs from Nautobot; live health compared with it"],
+        ["GET /api/tools/asns, /api/tools/asns.xlsx", "ASN Database: every ASN and BGP session, as JSON or an Excel workbook"],
+        ["GET /api/tools/vlans, /api/tools/vlans.xlsx", "VLAN Database: every VLAN, as JSON or an Excel workbook"],
         ["GET /api/stream", "Server-sent events: requests that changed"]])}
 <h3>Security model</h3>
 <p>Django accounts in two groups: requesters submit and see their own requests; operators see all, and approve, reject and retry. Every change through the API requires the session's CSRF token. The device tools and the Fabric Dashboard run only commands from a fixed server-side list (the browser names a device and categories, never a command), redact password hashes, keys and similar secrets before anything is shown or downloaded, and log every retrieval with who asked.</p>
@@ -317,7 +326,7 @@ def body(m):
     # 9 ----------------------------------------------------------------------------------------------------------------------
     S.append(f"""<section><h2><span class="n">9</span>A change end to end: Add a VLAN</h2>
 <p class="lead">Adding a VLAN touches seven systems and takes about six minutes, almost all of it in the two pipeline runs.</p>
-{f(17, m.d_sequence(), "Sequence of an Add a VLAN request. Solid: requests and writes; dashed: reads and observation.")}
+{f(19, m.d_sequence(), "Sequence of an Add a VLAN request. Solid: requests and writes; dashed: reads and observation.")}
 <ol>
 <li><b>Request.</b> The user picks a VRF and presses <i>Select the next unused VLAN ID</i>; nothing else needs typing except a reason. The app fills in, for example, VLAN 45, VNI 10045, vlan_45_app, 172.16.4.0/24 with gateway 172.16.4.1. An operator approves.</li>
 <li><b>phpIPAM.</b> Checks first (the VLAN and subnet still free, or already reserved by this request), then the VLAN, the subnet and the gateway address are reserved.</li>
