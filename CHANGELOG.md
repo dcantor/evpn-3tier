@@ -2,6 +2,14 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.20.1] - 2026-11-09
+
+### Changed
+- VLANs 10, 20 and 30 renamed vlan_10_web, vlan_20_app and vlan_30_db in Nautobot and phpIPAM (they were web-10 /
+  app-20 / db-30 and web / app / db, from the initial loads), the vlan_<ID>_<VRF> format the self-service VLANs use.
+  `tools/nautobot_seed.py` and `tools/phpipam_load.py` now name tier VLANs that way (`lab.sh ipam --check`: 0
+  changes). Reconciliation: 120/120, no warnings.
+
 ## [0.20.0] - 2026-11-09
 
 ### Added

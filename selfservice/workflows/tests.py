@@ -547,7 +547,7 @@ class ReconcileTests(TestCase):
     def _data(self):
         ip, net = ipaddress.ip_address, ipaddress.ip_network
         P = {"vrfs": {"web", "app"},
-             "vlans": {10: {"name": "web-10", "description": ""}, 41: {"name": "vlan_41_web", "description": "request #6"}, 110: {"name": "transit-web", "description": ""}},
+             "vlans": {10: {"name": "vlan_10_web", "description": ""}, 41: {"name": "vlan_41_web", "description": "request #6"}, 110: {"name": "transit-web", "description": ""}},
              "subnets": {net("172.16.0.0/16"): {"id": 1, "vrf": None, "vlan": None, "description": "", "container": True},
                          net("172.16.10.0/24"): {"id": 2, "vrf": "web", "vlan": 10, "description": "", "container": False},
                          net("172.16.0.0/24"): {"id": 3, "vrf": "web", "vlan": 41, "description": "request #6", "container": False},
@@ -560,7 +560,7 @@ class ReconcileTests(TestCase):
                               "vlans": [{"vlan": 10, "vrf": "web", "gateway": "172.16.10.1/24"}, {"vlan": 41, "vrf": "web", "gateway": "172.16.0.1/24"}],
                               "transit": [{"vlan": 110, "vrf": "web", "subnet": "172.16.110.0/28"}]}, "lb_peerings": []},
              "vrfs": {"web", "app"},
-             "vlans": {10: {"name": "web-10", "description": ""}, 41: {"name": "vlan_41_web", "description": "request #6"}, 110: {"name": "transit-web", "description": ""}},
+             "vlans": {10: {"name": "vlan_10_web", "description": ""}, 41: {"name": "vlan_41_web", "description": "request #6"}, 110: {"name": "transit-web", "description": ""}},
              "prefixes": {net("172.16.10.0/24"): {"vrf": "web", "vlan": 10, "description": ""}, net("172.16.0.0/24"): {"vrf": "web", "vlan": 41, "description": "request #6"},
                           net("172.16.110.0/28"): {"vrf": "web", "vlan": 110, "description": ""}},
              "addresses": {ipaddress.ip_interface("172.16.10.11/24"): "web1"}}

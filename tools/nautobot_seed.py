@@ -108,7 +108,7 @@ def vlan(vid, name, t, desc):
     want_vids.add(vid)
     o = nb.ipam.vlans.get(vid=vid, vlan_group=vg.id) or nb.ipam.vlans.create(vid=vid, name=name, vlan_group=vg.id, status=active.id, tenant=tenants[t].id)
     vlans[vid] = ensure(o, name=name, tenant=tenants[t].id, description=desc)
-for v in EV["vlans"]: vlan(v["vlan"], f"{v['vrf']}-{v['vlan']}", v["vrf"], f"tier VLAN, L2VNI {v['vni']}, anycast gateway {v['gateway']} on {'+'.join(v['on'])}")
+for v in EV["vlans"]: vlan(v["vlan"], f"vlan_{v['vlan']}_{v['vrf']}", v["vrf"], f"tier VLAN, L2VNI {v['vni']}, anycast gateway {v['gateway']} on {'+'.join(v['on'])}")
 for t in EV["transit"]: vlan(t["vlan"], f"transit-{t['vrf']}", t["vrf"], f"firewall transit {t['vrf']}, L2VNI {t['vni']}, {t['subnet']} (borders + firewalls)")
 for t in V.values(): vlan(t["l3vlan"], f"{t['name']}-l3vni", t["name"], f"L3VNI {t['l3vni']} of VRF {t['name']}")
 want_pfx = set()

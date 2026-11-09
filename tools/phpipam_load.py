@@ -99,7 +99,7 @@ def plan():
     rt = EV["rt_as"]; leaves = sorted((n for n in inv["nodes"] if n["role"] == "leaf"), key=lambda n: n["idx"])
     borders = sorted((n for n in inv["nodes"] if n["role"] == "border"), key=lambda n: n["idx"])
     vrfs = [{"name": v["name"], "rd": f"{rt}:{v['l3vni']}", "description": f"evpn-3tier VRF {v['name']}: L3VNI {v['l3vni']}, kernel table {v['table']}"} for v in EV["vrfs"]]
-    vlans = [{"number": v["vlan"], "name": f"{v['vrf']}", "description": f"tier VLAN, L2VNI {v['vni']}, VRF {v['vrf']}, anycast gateway {v['gateway']}"} for v in EV["vlans"]]
+    vlans = [{"number": v["vlan"], "name": f"vlan_{v['vlan']}_{v['vrf']}", "description": f"tier VLAN, L2VNI {v['vni']}, VRF {v['vrf']}, anycast gateway {v['gateway']}"} for v in EV["vlans"]]
     vlans += [{"number": t["vlan"], "name": f"transit-{t['vrf']}", "description": f"firewall transit {t['vrf']}, L2VNI {t['vni']} (borders + firewalls)"} for t in EV["transit"]]
     vlans += [{"number": v["l3vlan"], "name": f"{v['name']}-l3vni", "description": f"L3VNI {v['l3vni']} of VRF {v['name']} (symmetric IRB)"} for v in EV["vrfs"]]
     S, A = [], []                                # subnets: (cidr, description, vrf, vlan, parent); addresses: (ip, cidr, host, desc, mac, gw)
