@@ -30,8 +30,15 @@ set policy prefix-list DEFAULT-ONLY rule 10 action permit
 set policy prefix-list DEFAULT-ONLY rule 10 prefix 0.0.0.0/0
 set policy prefix-list DEFAULT-ONLY description 'what a tier VRF gets from the firewall: the default route'
 set policy prefix-list PUBLIC rule 10 action permit
+set policy prefix-list PUBLIC rule 10 description 'VLAN 10 (VRF web)'
 set policy prefix-list PUBLIC rule 10 prefix 172.16.10.0/24
-set policy prefix-list PUBLIC description 'what outside gets from the firewall: the web VLAN only'
+set policy prefix-list PUBLIC rule 20 action permit
+set policy prefix-list PUBLIC rule 20 description 'VLAN 20 (VRF app)'
+set policy prefix-list PUBLIC rule 20 prefix 172.16.20.0/24
+set policy prefix-list PUBLIC rule 30 action permit
+set policy prefix-list PUBLIC rule 30 description 'VLAN 30 (VRF db)'
+set policy prefix-list PUBLIC rule 30 prefix 172.16.30.0/24
+set policy prefix-list PUBLIC description 'what outside gets from the firewall: every tier VLAN subnet (routes; the zone policy filters traffic)'
 set policy route-map TO-TIER rule 10 action permit
 set policy route-map TO-TIER rule 10 match ip address prefix-list DEFAULT-ONLY
 set policy route-map TO-OUTSIDE rule 10 action permit
@@ -100,6 +107,10 @@ set firewall ipv4 name WEB-APP rule 10 log
 set firewall ipv4 name WEB-APP rule 10 description 'web -> app 172.16.20.0/24 tcp 8080'
 set firewall ipv4 name WEB-APP rule 10 destination port 8080
 set firewall ipv4 name WEB-APP rule 10 state new
+set firewall ipv4 name WEB-APP rule 1020 action accept
+set firewall ipv4 name WEB-APP rule 1020 protocol icmp
+set firewall ipv4 name WEB-APP rule 1020 destination address 172.16.20.0/24
+set firewall ipv4 name WEB-APP rule 1020 description 'standard: ICMP to VLAN 20 (app 172.16.20.0/24)'
 set firewall zone APP from WEB firewall name WEB-APP
 set firewall ipv4 name WEB-DB default-action drop
 set firewall ipv4 name WEB-DB default-log
@@ -110,6 +121,10 @@ set firewall ipv4 name WEB-DB rule 1 description 'replies'
 set firewall ipv4 name WEB-DB rule 2 action drop
 set firewall ipv4 name WEB-DB rule 2 state invalid
 set firewall ipv4 name WEB-DB rule 2 description 'invalid'
+set firewall ipv4 name WEB-DB rule 1030 action accept
+set firewall ipv4 name WEB-DB rule 1030 protocol icmp
+set firewall ipv4 name WEB-DB rule 1030 destination address 172.16.30.0/24
+set firewall ipv4 name WEB-DB rule 1030 description 'standard: ICMP to VLAN 30 (db 172.16.30.0/24)'
 set firewall zone DB from WEB firewall name WEB-DB
 set firewall ipv4 name WEB-OUTSIDE default-action drop
 set firewall ipv4 name WEB-OUTSIDE default-log
@@ -157,6 +172,10 @@ set firewall ipv4 name APP-WEB rule 1 description 'replies'
 set firewall ipv4 name APP-WEB rule 2 action drop
 set firewall ipv4 name APP-WEB rule 2 state invalid
 set firewall ipv4 name APP-WEB rule 2 description 'invalid'
+set firewall ipv4 name APP-WEB rule 1010 action accept
+set firewall ipv4 name APP-WEB rule 1010 protocol icmp
+set firewall ipv4 name APP-WEB rule 1010 destination address 172.16.10.0/24
+set firewall ipv4 name APP-WEB rule 1010 description 'standard: ICMP to VLAN 10 (web 172.16.10.0/24)'
 set firewall zone WEB from APP firewall name APP-WEB
 set firewall ipv4 name APP-DB default-action drop
 set firewall ipv4 name APP-DB default-log
@@ -174,6 +193,10 @@ set firewall ipv4 name APP-DB rule 10 log
 set firewall ipv4 name APP-DB rule 10 description 'app -> db 172.16.30.0/24 tcp 5432'
 set firewall ipv4 name APP-DB rule 10 destination port 5432
 set firewall ipv4 name APP-DB rule 10 state new
+set firewall ipv4 name APP-DB rule 1030 action accept
+set firewall ipv4 name APP-DB rule 1030 protocol icmp
+set firewall ipv4 name APP-DB rule 1030 destination address 172.16.30.0/24
+set firewall ipv4 name APP-DB rule 1030 description 'standard: ICMP to VLAN 30 (db 172.16.30.0/24)'
 set firewall zone DB from APP firewall name APP-DB
 set firewall ipv4 name APP-OUTSIDE default-action drop
 set firewall ipv4 name APP-OUTSIDE default-log
@@ -221,6 +244,10 @@ set firewall ipv4 name DB-WEB rule 1 description 'replies'
 set firewall ipv4 name DB-WEB rule 2 action drop
 set firewall ipv4 name DB-WEB rule 2 state invalid
 set firewall ipv4 name DB-WEB rule 2 description 'invalid'
+set firewall ipv4 name DB-WEB rule 1010 action accept
+set firewall ipv4 name DB-WEB rule 1010 protocol icmp
+set firewall ipv4 name DB-WEB rule 1010 destination address 172.16.10.0/24
+set firewall ipv4 name DB-WEB rule 1010 description 'standard: ICMP to VLAN 10 (web 172.16.10.0/24)'
 set firewall zone WEB from DB firewall name DB-WEB
 set firewall ipv4 name DB-APP default-action drop
 set firewall ipv4 name DB-APP default-log
@@ -231,6 +258,10 @@ set firewall ipv4 name DB-APP rule 1 description 'replies'
 set firewall ipv4 name DB-APP rule 2 action drop
 set firewall ipv4 name DB-APP rule 2 state invalid
 set firewall ipv4 name DB-APP rule 2 description 'invalid'
+set firewall ipv4 name DB-APP rule 1020 action accept
+set firewall ipv4 name DB-APP rule 1020 protocol icmp
+set firewall ipv4 name DB-APP rule 1020 destination address 172.16.20.0/24
+set firewall ipv4 name DB-APP rule 1020 description 'standard: ICMP to VLAN 20 (app 172.16.20.0/24)'
 set firewall zone APP from DB firewall name DB-APP
 set firewall ipv4 name DB-OUTSIDE default-action drop
 set firewall ipv4 name DB-OUTSIDE default-log
@@ -297,6 +328,10 @@ set firewall ipv4 name OUTSIDE-WEB rule 30 protocol icmp
 set firewall ipv4 name OUTSIDE-WEB rule 30 destination address 172.16.10.10
 set firewall ipv4 name OUTSIDE-WEB rule 30 log
 set firewall ipv4 name OUTSIDE-WEB rule 30 description 'outside -> web 172.16.10.10 icmp'
+set firewall ipv4 name OUTSIDE-WEB rule 1010 action accept
+set firewall ipv4 name OUTSIDE-WEB rule 1010 protocol icmp
+set firewall ipv4 name OUTSIDE-WEB rule 1010 destination address 172.16.10.0/24
+set firewall ipv4 name OUTSIDE-WEB rule 1010 description 'standard: ICMP to VLAN 10 (web 172.16.10.0/24)'
 set firewall zone WEB from OUTSIDE firewall name OUTSIDE-WEB
 set firewall ipv4 name OUTSIDE-APP default-action drop
 set firewall ipv4 name OUTSIDE-APP default-log
@@ -307,6 +342,10 @@ set firewall ipv4 name OUTSIDE-APP rule 1 description 'replies'
 set firewall ipv4 name OUTSIDE-APP rule 2 action drop
 set firewall ipv4 name OUTSIDE-APP rule 2 state invalid
 set firewall ipv4 name OUTSIDE-APP rule 2 description 'invalid'
+set firewall ipv4 name OUTSIDE-APP rule 1020 action accept
+set firewall ipv4 name OUTSIDE-APP rule 1020 protocol icmp
+set firewall ipv4 name OUTSIDE-APP rule 1020 destination address 172.16.20.0/24
+set firewall ipv4 name OUTSIDE-APP rule 1020 description 'standard: ICMP to VLAN 20 (app 172.16.20.0/24)'
 set firewall zone APP from OUTSIDE firewall name OUTSIDE-APP
 set firewall ipv4 name OUTSIDE-DB default-action drop
 set firewall ipv4 name OUTSIDE-DB default-log
@@ -317,6 +356,10 @@ set firewall ipv4 name OUTSIDE-DB rule 1 description 'replies'
 set firewall ipv4 name OUTSIDE-DB rule 2 action drop
 set firewall ipv4 name OUTSIDE-DB rule 2 state invalid
 set firewall ipv4 name OUTSIDE-DB rule 2 description 'invalid'
+set firewall ipv4 name OUTSIDE-DB rule 1030 action accept
+set firewall ipv4 name OUTSIDE-DB rule 1030 protocol icmp
+set firewall ipv4 name OUTSIDE-DB rule 1030 destination address 172.16.30.0/24
+set firewall ipv4 name OUTSIDE-DB rule 1030 description 'standard: ICMP to VLAN 30 (db 172.16.30.0/24)'
 set firewall zone DB from OUTSIDE firewall name OUTSIDE-DB
 set firewall ipv4 name OUTSIDE-SYNC default-action drop
 set firewall ipv4 name OUTSIDE-SYNC default-log

@@ -216,7 +216,20 @@ set interfaces ethernet eth7 vrf outside
 set vrf name outside protocols bgp neighbor 172.31.1.1 remote-as 65000
 set vrf name outside protocols bgp neighbor 172.31.1.1 description 'wan eth1'
 set vrf name outside protocols bgp neighbor 172.31.1.1 bfd profile fabric
-set vrf name outside protocols bgp neighbor 172.31.1.1 address-family ipv4-unicast
+set vrf name outside protocols bgp neighbor 172.31.1.1 address-family ipv4-unicast route-map export TO-WAN
+set policy prefix-list FABRIC-SUBNETS description 'the fabric subnets: one per VLAN (its anycast gateway subnet)'
+set policy prefix-list FABRIC-SUBNETS rule 10 action permit
+set policy prefix-list FABRIC-SUBNETS rule 10 description 'VLAN 10 (VRF web)'
+set policy prefix-list FABRIC-SUBNETS rule 10 prefix 172.16.10.0/24
+set policy prefix-list FABRIC-SUBNETS rule 20 action permit
+set policy prefix-list FABRIC-SUBNETS rule 20 description 'VLAN 20 (VRF app)'
+set policy prefix-list FABRIC-SUBNETS rule 20 prefix 172.16.20.0/24
+set policy prefix-list FABRIC-SUBNETS rule 30 action permit
+set policy prefix-list FABRIC-SUBNETS rule 30 description 'VLAN 30 (VRF db)'
+set policy prefix-list FABRIC-SUBNETS rule 30 prefix 172.16.30.0/24
+set policy route-map TO-WAN description 'eBGP to the WAN: only the fabric subnets'
+set policy route-map TO-WAN rule 10 action permit
+set policy route-map TO-WAN rule 10 match ip address prefix-list FABRIC-SUBNETS
 set policy prefix-list TO-FW description 'what the borders send the firewalls: tier subnets and the way out, no transit, no /32s'
 set policy prefix-list TO-FW rule 10 action deny
 set policy prefix-list TO-FW rule 10 prefix 172.16.110.0/28
