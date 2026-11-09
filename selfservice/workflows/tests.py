@@ -19,11 +19,14 @@ LAB = {
     "asns_used": [65000, 65100, 65101, 65102, 65103, 65104, 65121, 65122, 65200, 65500],
     "switch_pairs": {"rack1 leaves": ["leaf1", "leaf2"], "rack2 leaves": ["leaf3", "leaf4"], "border leaves": ["border1", "border2"]},
     "tier_vlans": [],
+    "lbs": {"lb1": {"pair": "border leaves", "switches": ["border1", "border2"], "vrf": "web", "peering": None},
+            "lb2": {"pair": "border leaves", "switches": ["border1", "border2"], "vrf": "web", "peering": {"asn": 65320}}},
+    "lb_peerings": [],
 }
 patched = mock.patch("workflows.labmodel.model", return_value=LAB)
 
 VLAN_OK = {"vlan_id": 40, "name": "app-backup", "vrf": "app", "gateway": "172.16.40.1/24", "span": "leaves", "reason": "backups"}
-LB_OK = {"name": "lb3", "attach_to": "border leaves", "vrf": "web", "asn": 65310, "peering_vlan": 150, "peering_subnet": "172.16.150.0/29",
+LB_OK = {"device": "lb1", "asn": 65310, "peering_vlan": 150, "peering_subnet": "172.16.150.0/29",
          "vip_prefixes": "172.16.200.0/28\n172.16.201.0/28", "bfd": "on", "reason": "a second load-balancer pair"}
 
 
@@ -53,7 +56,12 @@ class AddVlanFormTests(TestCase):
 class LbPeeringFormTests(TestCase):
     def test_valid(self, _m):
         f = F.LbPeeringForm(LB_OK); self.assertTrue(f.is_valid(), f.errors)
-        self.assertEqual(f.params()["vip_prefixes"], ["172.16.200.0/28", "172.16.201.0/28"])
+        p = f.params()
+        self.assertEqual(p["vip_prefixes"], ["172.16.200.0/28", "172.16.201.0/28"])
+        self.assertEqual((p["attach_to"], p["switches"], p["vrf"], p["vni"]), ("border leaves", ["border1", "border2"], "web", 10150))
+
+    def test_device_already_peering(self, _m):
+        f = F.LbPeeringForm({**LB_OK, "device": "lb2"}); self.assertFalse(f.is_valid()); self.assertIn("device", f.errors)
 
     def test_asn_in_use(self, _m):
         f = F.LbPeeringForm({**LB_OK, "asn": 65121}); self.assertFalse(f.is_valid()); self.assertIn("asn", f.errors)
@@ -92,7 +100,7 @@ class RequestFlowTests(TestCase):
 
     def test_lb_request(self, _m):
         self.submit(self.alice, "lb-peering", LB_OK)
-        self.assertEqual(WorkflowRequest.objects.get().title, "Peer load balancer lb3 (AS 65310) with the border leaves")
+        self.assertEqual(WorkflowRequest.objects.get().title, "Peer load balancer lb1 (AS 65310) with the border leaves")
 
     def test_requesters_see_only_their_own(self, _m):
         self.submit(self.alice); wr = WorkflowRequest.objects.get()
@@ -130,6 +138,9 @@ class RequestFlowTests(TestCase):
 @patched
 class ApprovalTests(TestCase):
     def setUp(self):
+        # setUp submits a request: the fixed lab model must apply here too (a class decorator patches only the tests —
+        # unpatched, setUp validated against the live lab, where VLAN 40 now exists)
+        p = mock.patch("workflows.labmodel.model", return_value=LAB); p.start(); self.addCleanup(p.stop)
         self.alice = User.objects.create_user("alice", password="alice-password-1")
         self.op = User.objects.create_user("olga", password="olga-password-1")
         ops = Group.objects.create(name="operators")

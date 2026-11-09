@@ -15,7 +15,7 @@ Nautobot is not touched: syncing phpIPAM and Nautobot is for later.
                               the web VIP, transit (borders, firewalls), wan links, the sync link and its VRRP address,
                               the per-VRF probe addresses, the test clients.
   phpipam_load.py [--check]   --check: report what would be created / changed, change nothing"""
-import argparse, html, ipaddress, json, os, secrets, subprocess, sys
+import argparse, html, ipaddress, json, os, secrets, shlex, subprocess, sys
 from pathlib import Path
 import requests, urllib3
 

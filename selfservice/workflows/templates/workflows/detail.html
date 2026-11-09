@@ -10,7 +10,8 @@
         <dt>Submitted</dt><dd>{{ r.created|date:"Y-m-d H:i" }}</dd>
         <dt>Why</dt><dd>{{ r.reason|linebreaksbr }}</dd>
         {% if r.decided_by %}<dt>{% if r.status == "rejected" %}Rejected{% else %}Approved{% endif %} by</dt><dd>{{ r.decided_by.get_username }}, {{ r.decided_at|date:"Y-m-d H:i" }}</dd>{% endif %}
-        {% if r.result.switches_run_url %}<dt>Pipeline run</dt><dd><a href="{{ r.result.switches_run_url }}">evpn-3tier-switches #{{ r.result.switches_run }}</a></dd>{% endif %}
+        {% if r.result.switches_run_url %}<dt>Pipeline runs</dt><dd><a href="{{ r.result.switches_run_url }}">evpn-3tier-switches #{{ r.result.switches_run }}</a>{% if r.result.lb_run_url %} · <a href="{{ r.result.lb_run_url }}">evpn-3tier-loadbalancers #{{ r.result.lb_run }}</a>{% endif %}</dd>{% endif %}
+        {% if r.result.vip %}<dt>VIP</dt><dd class="mono">{{ r.result.vip }}</dd>{% endif %}
         {% if r.result.error %}<dt>Error</dt><dd class="errorlist" style="padding:0">{{ r.result.error }}</dd>{% endif %}
       </dl>
       {% if live %}<p class="small mute">{% if r.status == "approved" %}Queued for the worker{% else %}The worker is carrying it out{% endif %} — this page refreshes every 5 s.</p>{% endif %}

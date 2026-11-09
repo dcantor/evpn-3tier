@@ -64,27 +64,26 @@ class AddVlanForm(RequestForm):
 
 
 class LbPeeringForm(RequestForm):
-    field_order = ["name", "attach_to", "vrf", "asn", "peering_vlan", "peering_subnet", "vip_prefixes", "bfd", "reason"]
-    name = forms.CharField(max_length=31, help_text="The load balancer's name, e.g. lb3")
-    attach_to = forms.ChoiceField(label="Attach to", help_text="The switch pair it is dual-homed to (EVPN multihoming) and peers with.")
-    vrf = forms.ChoiceField(label="VRF")
+    field_order = ["device", "asn", "peering_vlan", "peering_subnet", "vip_prefixes", "bfd", "reason"]
+    device = forms.ChoiceField(label="Load balancer", help_text="A load balancer on the fabric (from Nautobot): it peers with the switch pair it is dual-homed to, in its own VRF.")
     asn = forms.IntegerField(label="Its ASN", min_value=64512, max_value=65534, help_text="A private ASN the lab does not use.")
-    peering_vlan = forms.IntegerField(label="Peering VLAN", min_value=2, max_value=4094, help_text="The VLAN the BGP sessions run in (not used in the lab).")
-    peering_subnet = forms.CharField(label="Peering subnet", help_text="e.g. 172.16.150.0/29 — the switches take the first addresses, the load balancer the last.")
+    peering_vlan = forms.IntegerField(label="Peering VLAN", min_value=2, max_value=4094, help_text="The VLAN the BGP sessions run in (not used in the lab). Its L2VNI will be 10000 + the VLAN ID.")
+    peering_subnet = forms.CharField(label="Peering subnet", help_text="e.g. 172.16.150.0/29 — the switches take .1 and .2, the load balancer the last usable address.")
     vip_prefixes = forms.CharField(label="VIP prefixes it may announce", widget=forms.Textarea(attrs={"rows": 3}),
-                                   help_text="One per line, e.g. 172.16.200.0/28 — inside 172.16.0.0/16, overlapping no existing subnet. The fabric accepts only these.")
+                                   help_text="One per line, e.g. 172.16.200.0/28 — inside 172.16.0.0/16, overlapping no existing subnet. The fabric accepts only these; the load balancer serves the first address of each.")
     bfd = forms.BooleanField(label="BFD on the sessions", required=False, initial=True)
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
-        m = _model()
-        self.fields["attach_to"].choices = [(k, f"{k} ({', '.join(v)})") for k, v in m["switch_pairs"].items()]
-        self.fields["vrf"].choices = [(v, v) for v in m["vrfs"]]
+        lbs = _model().get("lbs", {})
+        self.fields["device"].choices = [(k, f"{k} — {v['pair']} ({', '.join(v['switches'])}), VRF {v['vrf']}" + (" — already peering" if v.get("peering") else ""))
+                                         for k, v in lbs.items()]
 
-    def clean_name(self):
-        n = self.cleaned_data["name"].strip().lower()
-        if not SLUG.match(n): raise forms.ValidationError("Lower-case letters, digits and dashes, starting with a letter.")
-        return n
+    def clean_device(self):
+        d = self.cleaned_data["device"]; lb = _model()["lbs"][d]
+        if lb.get("peering"): raise forms.ValidationError(f"{d} already peers with the fabric (AS {lb['peering']['asn']}).")
+        if not lb.get("pair") or not lb.get("vrf"): raise forms.ValidationError(f"{d} is not dual-homed to a switch pair in a VRF (Nautobot).")
+        return d
 
     def clean_asn(self):
         a = self.cleaned_data["asn"]; m = _model()
@@ -92,8 +91,9 @@ class LbPeeringForm(RequestForm):
         return a
 
     def clean_peering_vlan(self):
-        v = self.cleaned_data["peering_vlan"]
-        if v in _model()["vlans_used"]: raise forms.ValidationError(f"VLAN {v} is in use.")
+        v = self.cleaned_data["peering_vlan"]; m = _model()
+        if v in m["vlans_used"]: raise forms.ValidationError(f"VLAN {v} is in use.")
+        if 10000 + v in m["vnis_used"]: raise forms.ValidationError(f"VNI {10000 + v} is in use.")
         return v
 
     def _net(self, s, what):
@@ -105,16 +105,17 @@ class LbPeeringForm(RequestForm):
 
     def clean_peering_subnet(self):
         net = self._net(self.cleaned_data["peering_subnet"], "peering subnet")
-        if not 28 <= net.prefixlen <= 30: raise forms.ValidationError("peering subnet: a /28 to /30 (two switches and the load balancer).")
+        if not 28 <= net.prefixlen <= 29: raise forms.ValidationError("peering subnet: a /28 or /29 (two switches and the load balancer).")
         return str(net)
 
     def clean_vip_prefixes(self):
         lines = [l for l in self.cleaned_data["vip_prefixes"].splitlines() if l.strip()]
         if not lines: raise forms.ValidationError("At least one prefix.")
         nets = [self._net(l, "VIP prefix") for l in lines]
-        for i, a in enumerate(nets):
-            for b in nets[i + 1:]:
-                if a.overlaps(b): raise forms.ValidationError(f"{a} and {b} overlap.")
+        if any(n.prefixlen > 30 for n in nets): raise forms.ValidationError("VIP prefixes: /30 or larger (the first address is the VIP).")
+        for i, x in enumerate(nets):
+            for y in nets[i + 1:]:
+                if x.overlaps(y): raise forms.ValidationError(f"{x} and {y} overlap.")
         return [str(n) for n in nets]
 
     def clean(self):
@@ -123,3 +124,7 @@ class LbPeeringForm(RequestForm):
         if ps and any(ipaddress.ip_network(ps).overlaps(ipaddress.ip_network(v)) for v in vips):
             raise forms.ValidationError("The peering subnet and the VIP prefixes overlap.")
         return c
+
+    def params(self):
+        p = super().params(); lb = _model()["lbs"][p["device"]]
+        p.update(attach_to=lb["pair"], switches=lb["switches"], vrf=lb["vrf"], vni=10000 + p["peering_vlan"]); return p
