@@ -9,6 +9,8 @@ All notable changes to this lab are documented here. The format follows [Keep a 
   app-20 / db-30 and web / app / db, from the initial loads), the vlan_<ID>_<VRF> format the self-service VLANs use.
   `tools/nautobot_seed.py` and `tools/phpipam_load.py` now name tier VLANs that way (`lab.sh ipam --check`: 0
   changes). Reconciliation: 120/120, no warnings.
+- VLAN 40 (VRF app, request #2) renamed app-backup -> vlan_40_app in Nautobot and phpIPAM: every tier VLAN now
+  follows vlan_<ID>_<VRF>.
 
 ## [0.20.0] - 2026-11-09
 
