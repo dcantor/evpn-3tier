@@ -47,6 +47,22 @@ NB_PLAN = """{
   "wan": {"clients": "198.51.100.0/24", ...}, "web_vip": "172.16.10.10", "fabric_mtu": 9000, "max_paths": 4
 }"""
 
+INV_QUERY = """query {
+  config_contexts(name: ["evpn-3tier"]) { data }
+  devices(location: ["evpn-3tier"]) {
+    name local_config_context_data
+    role { name } rack { name } platform { name } primary_ip4 { address }
+    interfaces {
+      name description mac_address mtu
+      vrf { name }
+      ip_addresses { address }
+      cable { label }
+      cable_termination { cable_end }
+      cable_peer_interface { name device { name } }
+    }
+  }
+}"""
+
 PROGRESS = """{
   "stages":    [{"key": "phpipam", "label": "phpIPAM reservation", "status": "done", "started": "…", "finished": "…"}, …],
   "pipelines": {"evpn-3tier-switches#23": {
@@ -60,13 +76,18 @@ PROGRESS = """{
 }"""
 
 
+def img(src, alt, w=100):
+    """A screenshot as a figure body: centred, framed."""
+    return f'<img src="{src}" alt="{alt}" style="width:{w}%;display:block;margin:0 auto;border:1px solid #d6dbe4;border-radius:2mm">'
+
+
 def body(m):
     f, t, c = m.fig, m.table, m.code
     S = []
 
     S.append("""<div class="toc"><h2>Contents</h2><ol>
 <li>Executive summary</li><li>Platform and deployment</li><li>The network fabric</li><li>Routing and security policy</li>
-<li>The application</li><li>Sources of truth</li><li>Automation and orchestration</li><li>Fabric Factory, the self-service app</li>
+<li>The application</li><li>Sources of truth and what is in Nautobot</li><li>Automation and orchestration</li><li>Fabric Factory, the self-service app</li>
 <li>A change end to end: Add a VLAN</li><li>Resilience and verification</li><li>The tech stack</li><li>Operating the lab</li>
 <li>Design decisions and lessons learned</li><li>Limitations and roadmap</li></ol></div>""")
 
@@ -75,10 +96,11 @@ def body(m):
 <p class="lead">evpn-3tier is a complete data centre in software: a VyOS EVPN/VXLAN fabric, a stateful firewall pair, a WAN router and a three-tier web application, running as 20 virtual machines on one host. Fabric Factory, its self-service front end, turns a request typed into a web form into a verified network change: an operator approves, and the automation reserves addresses in phpIPAM, records intent in Nautobot, configures the devices through four Ansible pipelines in Gitea, and proves the result by pinging every server from the WAN.</p>
 <div class="kpis"><div class="kpi"><b>20</b><span>VMs: 11 VyOS, 9 Alpine Linux</span></div><div class="kpi"><b>4</b><span>VRFs; the firewalls are the only path between them</span></div>
 <div class="kpi"><b>4</b><span>Gitea pipelines, one per device group, five steps each</span></div><div class="kpi"><b>65</b><span>end-to-end checks in <code>verify</code>; 9 test suites</span></div></div>
-<p>Three ideas shape the lab:</p>
+<p>Four ideas shape the lab:</p>
 <ul><li><b>Intent, not commands.</b> Nobody configures a device by hand. phpIPAM holds the addressing, Nautobot holds the plan, and pipelines render every configuration from the plan. Deleting intent deletes configuration.</li>
 <li><b>Isolation by routing.</b> Each application tier lives in its own VRF and only learns a default route that points at the firewalls, so every packet between tiers, or to the WAN, crosses the zone firewall.</li>
-<li><b>Visible, reversible automation.</b> Every workflow step is idempotent and shown live; a failed request is fixed and retried, and every change is checked on the devices and from the WAN before it is called done.</li></ul>
+<li><b>Fewer fields, fewer mistakes.</b> A requester never types a VLAN ID, a VNI, a name, a subnet or a gateway. When a VLAN is requested, the system fills those in itself: the next unused VLAN ID and the next free subnet, from the sources of truth. By design, there is nothing to mistype and nothing to collide.</li>
+<li><b>Visible, reversible automation.</b> Every workflow step is idempotent and shown live; a failed request is fixed and retried, and every change is checked on the devices and from the WAN before it is called done. The Fabric Dashboard shows the whole fabric, the KPIs its design implies and a live check of the network against that design, at any time.</li></ul>
 <p>The paper describes the platform, the network design, the policy, the application, the sources of truth, the automation and orchestration in detail, the self-service app, a change end to end, how the lab survives failures, and the full tech stack.</p>
 </section>""")
 
@@ -88,7 +110,7 @@ def body(m):
 {f(1, m.d_platform(), "Platform and deployment. The 20 VMs, the lab host's services, and the NMS services the automation depends on.")}
 <p>Each VM is a KVM guest managed by libvirt. The fabric's links are not bridges: every switch port is a QEMU UDP tunnel to exactly one peer port, so the wiring is point-to-point like real cabling and is proved by <code>lab.sh check-wiring</code> (MAC addresses and LACP partners). Every VM also has a management interface on the e3t-oob bridge, which the automation, the device tools and the monitoring use; none of that traffic touches the fabric.</p>
 {t(["Service", "Where", "Port", "Purpose"], [
-        ["Fabric Factory", "lab host", "8120", "Self-service app: requests, approval, live progress, device tools, API"],
+        ["Fabric Factory", "lab host", "8120", "Self-service app: requests, approval, live progress, device tools, Fabric Dashboard, API"],
         ["Lab portal", "lab host", "8119", "Live topology, runs, the Order Desk shop, Prometheus metrics"],
         ["phpIPAM relay", "lab host → IPAM VM", "8443", "TLS passthrough to phpIPAM's UI and API"],
         ["Gitea Actions runner", "lab host", "—", "Executes the four pipelines in host mode"],
@@ -146,7 +168,7 @@ def body(m):
 </section>""")
 
     # 6 ----------------------------------------------------------------------------------------------------------------------
-    S.append(f"""<section><h2><span class="n">6</span>Sources of truth</h2>
+    S.append(f"""<section><h2><span class="n">6</span>Sources of truth and what is in Nautobot</h2>
 <p class="lead">Two systems hold the truth, each for one kind of fact; everything on the devices is derived from them.</p>
 {t(["System", "Holds", "Written by", "Read by"], [
         ["phpIPAM 1.8.3", "Addressing: the evpn-3tier section, subnets under 172.16.0.0/16, gateway and host reservations, VLAN numbers, VRFs", "Fabric Factory (reserves first, releases last); the initial loader", "Fabric Factory's allocator (free /24s, used VLANs)"],
@@ -155,12 +177,51 @@ def body(m):
 <p>The config context is the heart of the plan. Pipelines render every device from it; Fabric Factory edits it. An excerpt:</p>
 {c(NB_PLAN)}
 <p><b>Why both.</b> phpIPAM is the authority on which addresses are free, so allocation and reservation happen there first; Nautobot is the authority on what the network should be, so the pipelines read only Nautobot. Fabric Factory writes phpIPAM before Nautobot when adding, and releases phpIPAM after the devices are clean when removing, so an address is never handed out while still in use.</p>
+<h3>Where the lab lives in Nautobot</h3>
+<p>The NMS's Nautobot is shared by several labs, so everything of this one sits under five names and never mixes with the others: the location, the namespace, the VLAN group and the tenant group are all called <b>evpn-3tier</b>, and so is the config context; device names carry the prefix <b>e3t-</b> (Nautobot names are global). <code>tools/nautobot_seed.py</code> creates all of it from lab.conf (idempotent; it also removes stale objects it owns), and from then on the workflows change it.</p>
+{t(["Object", "Where in Nautobot", "Count", "Created and changed by"], [
+        ["Location", "Organization → Locations → <b>evpn-3tier</b> (type Site)", "1", "Seed"],
+        ["Racks", "Organization → Racks, location evpn-3tier: spine, rack1, rack2, border, edge, wan", "6", "Seed"],
+        ["Devices", "Devices → Devices, location evpn-3tier. Name e3t-&lt;node&gt;, role e3t-&lt;role&gt;, device type VyOS or Alpine host, platform vyos or alpine, rack, primary IPv4 = the OOB address (Ansible's ansible_host); local config context: index, ASN, console port, Ethernet segment", "19", "Seed"],
+        ["Interfaces", "On each device: eth0 (management only), eth1–7 with the lab's MACs, descriptions and MTU 9000 on fabric links; dum0 with the loopback /32; bond0 and bond0.&lt;VLAN&gt; on the servers", "117", "Seed"],
+        ["Cables", "Every link of lab.conf, labelled with its kind: fabric, access, wan or sync", "35", "Seed"],
+        ["IP addresses", "IPAM → IP Addresses, namespace evpn-3tier: OOB addresses, loopbacks, the servers' tier addresses", "38", "Seed"],
+        ["VRFs and route targets", "IPAM → VRFs, namespace evpn-3tier: web, app, db, outside, each with tenant e3t-&lt;VRF&gt; and route target 65500:&lt;L3VNI&gt; (import and export)", "4 + 4", "Seed"],
+        ["Tenants", "Tenancy → Tenants, group evpn-3tier: e3t-web, e3t-app, e3t-db, e3t-outside", "4", "Seed"],
+        ["VLANs", "IPAM → VLANs, group evpn-3tier: tier VLANs, firewall transit, load balancer peering, the L3VNI VLANs", "21", "Seed; Add a VLAN and LB peering create, Remove a VLAN deletes"],
+        ["Prefixes", "IPAM → Prefixes, namespace evpn-3tier, each with its VRF, VLAN, tenant and location", "25", "Seed; Add a VLAN and LB peering create, Remove a VLAN deletes"],
+        ["Config context", "Extensibility → Config Contexts → <b>evpn-3tier</b>, scoped to the location: <code>evpn</code> (VRFs, VLANs with VNI, gateway and span, transit), <code>fw_policy</code> (38 rules), <code>lb_peerings</code> (2), <code>wan</code>, <code>es</code>, <code>oob</code>, <code>web_vip</code>, MTU and ECMP settings", "1", "Seed; every workflow edits it"]])}
+{f(6, img("nb-devices.png", "Nautobot's device list filtered to location evpn-3tier: 19 devices with status, tenant, role, device type, rack and management address"), "The 19 devices in location evpn-3tier: role, device type, rack and the management address the pipelines connect to.")}
+{f(7, img("nb-interfaces.png", "Interfaces of e3t-leaf1 in Nautobot: dum0 loopback, eth0 OOB, eth1 and eth2 cabled to the spines with MTU 9000, eth3 to eth5 cabled to web1, app1 and db1"), "e3t-leaf1's interfaces and cables: the uplinks to both spines (fabric, MTU 9000) and the three server legs (access). The pipelines, the topology view and the switch-pair logic are all built from these cables.")}
+{f(8, img("nb-prefixes.png", "Prefixes in namespace evpn-3tier: the OOB and loopback networks, then the tier subnets 172.16.0.0/24 to 172.16.6.0/24 created by self-service requests 6 to 18, each with its VRF, tenant, location and VLAN"), "Prefixes in namespace evpn-3tier. Each subnet a request added names the request in its description and is tied to its VRF, tenant, location and VLAN.")}
+<h3>How Fabric Factory writes to Nautobot</h3>
+<p>The worker uses Nautobot's REST API with a token read from the NMS at run time. Every write is preceded by a read of the same object (a GET by name, VLAN ID or prefix), so a retry finds what an earlier attempt created and skips it; the config context is always read, changed and written back whole.</p>
+{t(["Workflow", "REST calls, in order", "What they do"], [
+        ["Add a VLAN", "GET + PATCH /api/extras/config-contexts/{id}/", "Append {vlan, vrf, vni, gateway, on} to <code>evpn.vlans</code>, after checking that no VNI or subnet in the plan clashes"],
+        ["", "POST /api/ipam/vlans/", "VLAN object: VID, name vlan_&lt;ID&gt;_&lt;VRF&gt;, group evpn-3tier, tenant, a description naming the request"],
+        ["", "POST /api/ipam/prefixes/, PATCH …/prefixes/{id}/, POST /api/ipam/vrf-prefix-assignments/", "The subnet in namespace evpn-3tier with its VLAN and tenant; then its location; then its VRF"],
+        ["", "GET + PATCH /api/extras/config-contexts/{id}/", "The Standard Firewall Rules: three ICMP entries in <code>fw_policy</code>, tagged standard and with the VLAN"],
+        ["Remove a VLAN", "GET + PATCH config context (twice)", "The VLAN out of <code>evpn.vlans</code>; its tagged entries out of <code>fw_policy</code>"],
+        ["", "DELETE /api/ipam/prefixes/{id}/, DELETE /api/ipam/vlans/{id}/", "The prefix and the VLAN object"],
+        ["LB peering", "GET + PATCH config context", "Append the peering to <code>lb_peerings</code> (ASN, switches, VLAN, VNI, subnet, VIPs, BFD)"],
+        ["", "POST vlans; POST prefixes + PATCH location + POST vrf-prefix-assignments", "VLAN peering-&lt;LB&gt;; the peering /29 and each VIP prefix in the VRF"]])}
+{f(9, img("nb-changelog.png", "Nautobot's change log for request 18 (Add VLAN 47): config context updated, VLAN vlan_47_web created, prefix 172.16.6.0/24 created and updated, location and VRF updated, config context updated"), "Nautobot's change log holds every write. Request #18 (Add VLAN 47), newest first: the plan entry (bottom), the VLAN and the prefix created, the prefix tied to its location and VRF, and the Standard Firewall Rules (top).")}
+<h3>How it is read back: GraphQL</h3>
+<p>Nothing walks the REST API object by object to rebuild the plan: each reader sends one GraphQL query to <code>/api/graphql/</code> and gets the devices, their cabling and the config context in a single answer.</p>
+{t(["Reader", "When", "Asks for", "Turns it into"], [
+        ["Pipeline inventory (<code>nautobot_inventory.py</code> in each Gitea repository)", "Every pipeline run", "The config context; every device of the location with role, rack, platform, primary IPv4, local context, and every interface's description, MAC, MTU, VRF, addresses, cable label and cable peer", "hosts.yml, group_vars (the whole lab model) and host_vars, committed to the repository; the templates render from it"],
+        ["Fabric Factory's lab model (<code>labmodel.py</code>)", "Form validation, allocation, removal checks (cached 30 s)", "The config context; devices with role, rack and local context; the servers' bond interfaces with VRF and cable peers; the VLANs of the group", "VLAN IDs, VNIs, subnets and ASNs in use; switch pairs; each load balancer's pair and VRF; which VLANs may be removed"],
+        ["Fabric Dashboard (<code>fabric.py</code>)", "When the page opens (cached 30 s)", "The above plus device types, platforms, statuses, interface types, VRFs and prefixes", "Counts, design KPIs, the topology"],
+        ["The executors' guards", "Before every write", "REST GETs by name, VID or prefix", "Idempotence: what already exists is skipped"]])}
+<div style="break-inside:avoid"><p class="small">The pipelines' query, in full:</p>
+{c(INV_QUERY)}</div>
+{f(10, img("nb-graphql.png", "Nautobot's GraphiQL: a query for the leaves' racks, management addresses and uplink cabling and for prefix 172.16.6.0/24, with the JSON answer"), "The same kind of query in Nautobot's GraphiQL: the leaves with their racks, management addresses and uplink cables, and the prefix of VLAN 47 with its VRF and VLAN.")}
 </section>""")
 
     # 7 ----------------------------------------------------------------------------------------------------------------------
     S.append(f"""<section><h2><span class="n">7</span>Automation and orchestration</h2>
 <p class="lead">Fabric Factory orchestrates the systems in order; the pipelines are the only thing that configures a device; Ansible renders and applies, and deletes what intent no longer contains.</p>
-{f(6, m.d_orchestration(), "Automation and orchestration. Solid arrows: requests and writes; dashed: reads and observation.")}
+{f(11, m.d_orchestration(), "Automation and orchestration. Solid arrows: requests and writes; dashed: reads and observation.")}
 <h3>Interfaces between the components</h3>
 {t(["From → to", "Protocol and authentication", "Carries"], [
         ["Browser → Fabric Factory", "Plain HTTP in the lab; Django session cookie, CSRF token on every change", "JSON API calls; server-sent events with request changes (1 s)"],
@@ -171,7 +232,7 @@ def body(m):
         ["Pipeline → Gitea", "git over HTTP, the job's own token", "The rendered inventory, committed with [skip ci]"],
         ["Ansible → devices", "SSH on the management network; VyOS via vyos.vyos (paramiko), Linux via SSH + doas", "Configuration lines, files, services"],
         ["Worker / tools → devices", "SSH (paramiko) on the management network", "Post-change checks, the ping test, device configurations and state"]])}
-{f(7, m.d_pipeline(), "Anatomy of a pipeline run. The same five steps in all four repositories.")}
+{f(12, m.d_pipeline(), "Anatomy of a pipeline run. The same five steps in all four repositories.")}
 <h3>How the pipelines work</h3>
 <ul>
 <li><b>One repository per device group.</b> evpn-3tier-switches (spines, leaves, borders, wan), evpn-3tier-firewalls, evpn-3tier-loadbalancers and evpn-3tier-servers. Each deploys only its own devices, so a change to firewall templates cannot touch a switch.</li>
@@ -195,12 +256,43 @@ def body(m):
 
     # 8 ----------------------------------------------------------------------------------------------------------------------
     S.append(f"""<section><h2><span class="n">8</span>Fabric Factory, the self-service app</h2>
-<p class="lead">Users request changes in forms checked against the live lab; operators approve; a worker carries them out while everyone watches. Read-only tools show any device's configuration and state.</p>
+<p class="lead">Users request changes in forms checked against the live lab; operators approve; a worker carries them out while everyone watches. Read-only tools show any device's configuration and state, and the Fabric Dashboard shows the whole fabric at a glance.</p>
+<h3>Most fields fill themselves, by design</h3>
+<div class="callout"><b>When a user requests a VLAN, the system fills in most of the form automatically, without being asked.</b> The requester picks only the VRF (and, optionally, the span) and writes a reason. One button, <i>Select the next unused VLAN ID</i>, makes the app choose the next available VLAN ID and the next free subnet, and every value that follows from them. This is deliberate: hand-typed VLAN IDs, VNIs and subnets are where network changes most often go wrong, through a typo, a duplicate ID, or an overlap with a subnet already in use. Values the system allocates come from the sources of truth, cannot be edited in the form, and are checked again at submission and at execution.</div>
+<div class="grid2"><div>{f(13, '<img src="form-allocated.png" alt="The Add a VLAN form after Select the next unused VLAN ID: VLAN 48, VNI 10048, vlan_48_web, 172.16.7.1/24 from phpIPAM" style="width:100%;border:1px solid #d6dbe4;border-radius:2mm">', "The Add a VLAN form after one click. Only the VRF, the span and the reason were chosen by the user.")}</div>
+<div>{t(["Field", "Filled in by", "How"], [
+        ["VRF", "<b>Requester</b>", "web, app or db"],
+        ["Span", "<b>Requester</b>", "Every leaf (default), or leaves and borders"],
+        ["Reason", "<b>Requester</b>", "Free text for the operator"],
+        ["VLAN ID", "System", "Lowest unused ID, checked against Nautobot, phpIPAM and every open request"],
+        ["L2VNI", "System", "10000 + VLAN ID"],
+        ["Name", "System", "vlan_&lt;ID&gt;_&lt;VRF&gt;, e.g. vlan_48_web"],
+        ["Subnet", "System", "phpIPAM's first free /24 in 172.16.0.0/16 that overlaps nothing"],
+        ["Gateway", "System", "Always the subnet's first host address"]])}
+<p class="small">Re-checked at submission and again when the worker carries the request out, so a value taken in the meantime is caught before anything is written.</p></div></div>
 {t(["Workflow", "The user chooses", "The app works out", "Stages"], [
         ["Add a VLAN to the fabric", "VRF, span (leaves or leaves + borders), reason", "Next unused VLAN ID (and VNI), a free /24 from phpIPAM, gateway = first host, name vlan_ID_VRF", "phpIPAM → Nautobot → Standard Firewall Rules → switches → firewalls → checks → ping from the WAN"],
         ["Remove a VLAN from the fabric", "The VLAN, a confirmation, reason", "Whether it may go: not the lab's design, no hosts, not its VRF's last VLAN, only the gateway reserved in phpIPAM", "pre-flight → Nautobot → switches → firewalls → checks → phpIPAM release"],
         ["Set up a load balancer to peer with the fabric", "The load balancer, ASN, peering VLAN and subnet, VIP prefixes, BFD", "The switch pair and VRF from the load balancer's cabling in Nautobot", "Nautobot → switches → load balancers → phpIPAM → BGP, route and HTTP checks"]])}
-{f(8, m.d_states(), "Request lifecycle. Only approved requests are carried out; failed requests are retried after the cause is fixed.")}
+{f(14, m.d_states(), "Request lifecycle. Only approved requests are carried out; failed requests are retried after the cause is fixed.")}
+<h3>The Fabric Dashboard</h3>
+<p>The third tool on the New request page, next to the device configurations and device state, and like them read-only, so no approval is needed. It answers two questions at once: <i>what is this fabric made of</i>, and <i>does the running network still match its design</i>.</p>
+<ul><li><b>The design, from Nautobot.</b> One GraphQL query returns every device with its role, model, platform, rack and cabling, plus the plan's VRFs, VLANs, transit networks and load balancer peerings. The page shows the counts (8 switches: 2 spines, 4 leaves, 2 border leaves; 19 devices; 4 VRFs; 25 subnets; 11 tier VLANs; 35 cabled links; 12 ASNs; 38 firewall rules), every device by role and by model, each VRF with its L3 VNI, VLANs, subnets and servers, the subnets by kind, and a topology drawn from the cables (hovering over a device traces its links).</li>
+<li><b>Design KPIs, computed from the cabling.</b> Listed in the table below; each is green, amber or red against a simple rule.</li>
+<li><b>Live health vs. design.</b> Every device is asked over SSH, read-only and from a fixed command list (BGP and BFD summaries, EVPN VNIs, the software version, uptime). The results are compared with the design: one spine EVPN session per spine link, every BGP and BFD session up, the same VNIs on every leaf, one network software version.</li>
+<li><b>Change KPIs</b> from Fabric Factory's own requests: changes completed, the success rate, the median time from approval to a verified change, and open requests.</li></ul>
+<p>Both halves are cached for 30 seconds; the design is reloaded when a request finishes, so a new VLAN appears as soon as it is verified.</p>
+{f(15, '<img src="fabric-dashboard.png" alt="The Fabric Dashboard: eight tiles (8 switches, 4 VRFs, 25 subnets, 11 tier VLANs, 19 devices, 35 cabled links, 12 BGP ASNs, 38 firewall rules), eight design KPIs and the topology drawn from the cables in Nautobot" style="width:100%;border:1px solid #d6dbe4;border-radius:2mm">', "The Fabric Dashboard: the fabric in numbers, the design KPIs and the topology, all from Nautobot.")}
+{t(["Design KPI", "Today", "How it is worked out"], [
+        ["Leaf-to-spine ECMP", "2-way", "Uplinks to spines per leaf and border (the minimum)"],
+        ["Leaf oversubscription", "1.5:1", "Server-facing over spine-facing bandwidth; borders 2.5:1; target 3:1 or less"],
+        ["Fabric capacity", "120 Gbps", "12 spine links × 10 Gbps"],
+        ["Capacity after a spine fails", "50%", "(spines − 1) / spines"],
+        ["Dual-homed endpoints", "100%", "Servers, load balancers and firewalls cabled to two switches"],
+        ["Single points of failure", "1", "Roles with one device: wan, which stands in for the internet"],
+        ["VLAN IDs in use", "21", "Tier, transit, L3 and peering VLANs, of 4,093"],
+        ["172.16.0.0/16 allocated", "4.5%", "Addresses in Nautobot prefixes"]])}
+{f(16, '<img src="fabric-health.png" alt="Live health vs. design: 19/19 devices reachable, 12/12 fabric sessions, BGP 64/64, BFD 64/64, 14/14 VNIs on every leaf, one VyOS version, and a row per device" style="width:82%;display:block;margin:0 auto;border:1px solid #d6dbe4;border-radius:2mm">', "Live health vs. design, checked over read-only SSH: every session up and every leaf carrying the same VNIs.")}
 <h3>Validation and allocation</h3>
 <p>Forms are generated from server-side definitions and validated against a live model of the lab built from Nautobot (falling back to lab.conf): VLAN IDs, VNIs, ASNs and overlapping subnets already in use are refused, including those held by other open requests. The VLAN allocator picks the lowest unused ID above the highest tier VLAN, skipping anything in Nautobot, phpIPAM or an open request, and asks phpIPAM for its first free /24 under 172.16.0.0/16 that overlaps nothing. Values are re-checked at submission and again at execution.</p>
 <h3>Architecture</h3>
@@ -216,17 +308,18 @@ def body(m):
         ["POST /api/requests/{id}/{action}", "approve, reject, retry, cancel"],
         ["GET /api/requests/{id}/pipelines/…/log", "A pipeline step's whole log, read live from Gitea"],
         ["GET /api/devices, …/config, …/state, /api/devices-configs.zip", "Device list; configuration; live state by category; a zip of configurations"],
+        ["GET /api/fabric, /api/fabric/health", "Fabric Dashboard: the design and its KPIs from Nautobot; live health compared with it"],
         ["GET /api/stream", "Server-sent events: requests that changed"]])}
 <h3>Security model</h3>
-<p>Django accounts in two groups: requesters submit and see their own requests; operators see all, and approve, reject and retry. Every change through the API requires the session's CSRF token. The device tools run only commands from a fixed server-side list (the browser names a device and categories, never a command), redact password hashes, keys and similar secrets before anything is shown or downloaded, and log every retrieval with who asked.</p>
+<p>Django accounts in two groups: requesters submit and see their own requests; operators see all, and approve, reject and retry. Every change through the API requires the session's CSRF token. The device tools and the Fabric Dashboard run only commands from a fixed server-side list (the browser names a device and categories, never a command), redact password hashes, keys and similar secrets before anything is shown or downloaded, and log every retrieval with who asked.</p>
 </section>""")
 
     # 9 ----------------------------------------------------------------------------------------------------------------------
     S.append(f"""<section><h2><span class="n">9</span>A change end to end: Add a VLAN</h2>
 <p class="lead">Adding a VLAN touches seven systems and takes about six minutes, almost all of it in the two pipeline runs.</p>
-{f(9, m.d_sequence(), "Sequence of an Add a VLAN request. Solid: requests and writes; dashed: reads and observation.")}
+{f(17, m.d_sequence(), "Sequence of an Add a VLAN request. Solid: requests and writes; dashed: reads and observation.")}
 <ol>
-<li><b>Request.</b> The user picks a VRF and presses <i>Select the next unused VLAN ID</i>; the app shows, for example, VLAN 45, VNI 10045, vlan_45_app, 172.16.4.0/24 with gateway 172.16.4.1. An operator approves.</li>
+<li><b>Request.</b> The user picks a VRF and presses <i>Select the next unused VLAN ID</i>; nothing else needs typing except a reason. The app fills in, for example, VLAN 45, VNI 10045, vlan_45_app, 172.16.4.0/24 with gateway 172.16.4.1. An operator approves.</li>
 <li><b>phpIPAM.</b> Checks first (the VLAN and subnet still free, or already reserved by this request), then the VLAN, the subnet and the gateway address are reserved.</li>
 <li><b>Nautobot.</b> From what phpIPAM holds, read back: the VLAN enters the plan; the VLAN and prefix objects are created in the VRF.</li>
 <li><b>Standard Firewall Rules.</b> ICMP to the new subnet from the other zones is added to the firewall policy.</li>
