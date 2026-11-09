@@ -136,6 +136,12 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   172.16.0.0/16 that overlaps nothing — the **gateway is its first host**. The **name is `vlan_<VLAN ID>_<VRF>`**
   (e.g. `vlan_41_web`, underscores only). Nothing is reserved until the worker writes it: an open request (submitted / approved / running) holds its
   VLAN and subnet — the next allocation skips them, and submitting re-checks both.
+- **The borders' WAN export policy**: the eBGP sessions to the WAN export through **route-map `TO-WAN`**, which calls
+  **prefix-list `FABRIC-SUBNETS`** — one exact rule per fabric VLAN subnet, the rule number being the VLAN ID (a new
+  VLAN adds a rule, nothing renumbers). Rendered by both the pipeline (from Nautobot) and the lab (tools/render.py).
+  The WAN gets the fabric's subnets that reach VRF outside (today 172.16.10.0/24, the web tier) and nothing else — no
+  loopbacks, transit, /31s or /32s, nor the default route back. *Add a VLAN* puts its subnet in the list (the switches
+  pipeline) and checks both borders carry it.
 - **Add a VLAN, executed** (workflows/executors.py, every step idempotent): 1 Nautobot — the VLAN in the evpn-3tier plan
   (config context), the native VLAN and its prefix in the VRF; 2 Gitea — the evpn-3tier-switches pipeline (inventory,
   check, apply, verify), waited for, its run linked; 3 phpIPAM — VLAN, subnet, gateway reservation; 4 the devices — every

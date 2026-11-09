@@ -6,7 +6,8 @@ add-vlan
                render from — plus the native VLAN (group evpn-3tier) and its prefix (namespace evpn-3tier, in the VRF)
   2 Gitea      the evpn-3tier-switches pipeline: inventory from Nautobot, check, apply to the leaves / borders, verify
   3 phpIPAM    the VLAN (domain evpn-3tier), the subnet (under 172.16.0.0/16, its VRF and VLAN), the gateway reservation
-  4 devices    every switch in the span carries the VLAN (vlan-to-vni) and its anycast gateway
+  4 devices    every switch in the span carries the VLAN (vlan-to-vni) and its anycast gateway; both borders permit the
+               subnet to the WAN (prefix-list FABRIC-SUBNETS, called by route-map TO-WAN on the eBGP sessions to the WAN)
 lb-peering
   1 Nautobot   the peering in the plan (config context lb_peerings), its VLAN and prefixes (peering subnet, VIPs)
   2 Gitea      evpn-3tier-switches: the peering VLAN on the pair and the load balancer's legs, eBGP importing only the VIPs
@@ -105,6 +106,20 @@ def add_vlan(r, log):
         if f"vlan-to-vni {vid} vni {vni}" not in out or f"peth{vid} address {ipaddress.ip_interface(gw).ip}/32" not in out: bad.append(s)
     _check(not bad, f"VLAN {vid} is missing on {', '.join(bad)} after the pipeline")
     log(f"on the devices: VLAN {vid} -> VNI {vni} and the anycast gateway {gw} on {', '.join(switches)}")
+    # the WAN export policy: every border permits the new subnet to the WAN — prefix-list FABRIC-SUBNETS has its rule,
+    # route-map TO-WAN calls the prefix-list, and the eBGP sessions to the WAN export through the route-map
+    borders = [n["name"] for n in inv["nodes"] if n["role"] == "border"]
+    wan_peers = {w["border"]: w["wan_ip"].split("/")[0] for w in inv["wan"]["links"]}
+    bad = []
+    for b in borders:
+        _, out = ssh(b, "/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration commands | grep -E 'FABRIC-SUBNETS|TO-WAN'", inv=inv, timeout=120)   # VyOS quotes values (export 'TO-WAN'): match loosely
+        out = out.replace("'", "")
+        want = [f"prefix-list FABRIC-SUBNETS rule {vid} prefix {net}", f"prefix-list FABRIC-SUBNETS rule {vid} action permit",
+                "route-map TO-WAN rule 10 match ip address prefix-list FABRIC-SUBNETS",
+                f"neighbor {wan_peers[b]} address-family ipv4-unicast route-map export TO-WAN"]
+        if missing := [w for w in want if w not in out]: bad.append(f"{b} ({'; '.join(missing)})")
+    _check(not bad, f"the WAN export policy lacks {net} on: {', '.join(bad)}")
+    log(f"WAN export policy: {', '.join(borders)} permit {net} to the WAN (prefix-list FABRIC-SUBNETS rule {vid}, route-map TO-WAN on the eBGP sessions to the WAN)")
     return {"switches_run": num, "switches_run_url": url, "switches": switches}
 
 

@@ -220,7 +220,17 @@ def edge(inv, n):
         nb = f"set vrf name outside protocols bgp neighbor {ip}"
         out += [f"{e} address {w['border_ip']}", f"{e} vrf outside",
                 f"{nb} remote-as {_asn(inv, w['wan'])}", f"{nb} description '{w['wan']} {w['wan_port']}'", f"{nb} bfd profile {BFD_PROFILE}",
-                f"{nb} address-family ipv4-unicast"]
+                f"{nb} address-family ipv4-unicast route-map export TO-WAN"]
+    # what a border sends the WAN: the fabric's subnets and nothing else — a route-map calling a prefix-list with one
+    # exact rule per fabric VLAN subnet (rule number = VLAN ID: a new VLAN adds a rule, nothing renumbers)
+    fl = "set policy prefix-list FABRIC-SUBNETS"
+    out += [f"{fl} description 'the fabric subnets: one per VLAN (its anycast gateway subnet)'"]
+    for v in sorted(inv["evpn"]["vlans"], key=lambda v: v["vlan"]):
+        out += [f"{fl} rule {v['vlan']} action permit", f"{fl} rule {v['vlan']} description 'VLAN {v['vlan']} (VRF {v['vrf']})'",
+                f"{fl} rule {v['vlan']} prefix {ipaddress.ip_interface(v['gateway']).network}"]
+    rm = "set policy route-map TO-WAN"
+    out += [f"{rm} description 'eBGP to the WAN: only the fabric subnets'", f"{rm} rule 10 action permit",
+            f"{rm} rule 10 match ip address prefix-list FABRIC-SUBNETS"]
     # what a border sends the firewalls: no transit addresses and no host /32s. The other border's transit address
     # arrives here as an EVPN type-2 MAC/IP route (advertise-svi-ip) and lands in the VRF as a /32; sent on, it made
     # fw2 reach border2 *through* border1 — routed, TTL - 1, and single-hop BFD / eBGP to border2 died

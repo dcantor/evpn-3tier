@@ -2,6 +2,17 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.0] - 2026-11-09
+
+### Added
+- Borders: an outbound BGP policy on the eBGP sessions to the WAN — route-map TO-WAN calling prefix-list
+  FABRIC-SUBNETS (every fabric VLAN subnet; rule number = VLAN ID). In the switches pipeline's template (subnets from
+  Nautobot) and the lab's renderer. Before, a border sent the WAN everything in VRF outside (9 prefixes: loopbacks,
+  transit, /31s, /32s, the default route); now 172.16.10.0/24. Switches run #14, verify 61/61.
+- *Add a VLAN*: the new subnet joins FABRIC-SUBNETS (switches pipeline) and the request checks both borders permit it
+  to the WAN (prefix-list rule, route-map, export on the WAN sessions). Proven with request #7 (VLAN 42, vlan_42_app,
+  172.16.1.0/24).
+
 ## [0.12.1] - 2026-11-09
 
 ### Changed
