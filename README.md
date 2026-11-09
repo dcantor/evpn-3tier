@@ -103,9 +103,9 @@ requester: submit  ->  operator: approve / reject  ->  worker: Nautobot -> Gitea
 ```
 
 - **Catalog** (selfservice/workflows/catalog.py, forms.py): *Add a VLAN to the fabric* (VLAN ID, name, VRF, gateway prefix,
-  leaves or leaves + borders) — **automated**; *Set up a load balancer to peer with the fabric* (name, switch pair, VRF,
-  ASN, peering VLAN and subnet, VIP prefixes, BFD) — requests and approval work; execution is not automated yet (no BGP
-  peering towards hosts in the switch templates, no load balancer device). Forms are checked against **Nautobot** (the
+  leaves or leaves + borders) and *Set up a load balancer to peer with the fabric* (a load balancer from Nautobot — its
+  switch pair and VRF follow from its cabling — ASN, peering VLAN and subnet, VIP prefixes, BFD) — both **automated**.
+  Forms are checked against **Nautobot** (the
   source of truth; lab.conf if Nautobot does not answer): VLAN IDs and VNIs free, subnets inside 172.16.0.0/16 and
   overlapping nothing, private ASNs unused — so what the app added counts as used for the next request.
 - **Add a VLAN, executed** (workflows/executors.py, every step idempotent): 1 Nautobot — the VLAN in the evpn-3tier plan
@@ -113,15 +113,23 @@ requester: submit  ->  operator: approve / reject  ->  worker: Nautobot -> Gitea
   check, apply, verify), waited for, its run linked; 3 phpIPAM — VLAN, subnet, gateway reservation; 4 the devices — every
   switch in the span carries VLAN -> VNI and the anycast gateway. Proven: request #2, VLAN 40 (app-backup, VRF app,
   172.16.40.1/24) on leaf1-4.
+- **Load balancer peering, executed**: 1 Nautobot — the peering in the plan (config context `lb_peerings`), the peering
+  VLAN and the prefixes; 2 the evpn-3tier-switches pipeline — on the switch pair, `br0.<VLAN>` (.1/.2) in the VRF and an
+  eBGP neighbour (BFD optional) importing only the VIP prefixes, exporting nothing; 3 the evpn-3tier-loadbalancers
+  pipeline — `bond0.<VLAN>` (last address, loose rp_filter), the first address of each VIP prefix on `lo` (HAProxy binds
+  everything), BIRD 2 announcing the VIP prefixes; 4 phpIPAM — VLAN, peering subnet with its three addresses, VIP
+  prefixes; 5 checks — both sessions Established with prefixes, the VIP prefix in the VRF on a leaf (EVPN type-5),
+  `http://<VIP>/health` from a server in the VRF. Proven: request #3, lb1 AS 65310, VLAN 150 / VNI 10150,
+  172.16.150.0/29, VIPs 172.16.200.0/28 (172.16.200.1 answers `lb1 ok` from web1 / web2).
 - **Statuses**: submitted -> approved -> running -> done / failed (an operator can retry: steps are idempotent), or
   rejected / cancelled. A request running when the worker restarts is marked failed. Every step is in its history.
 - **Users** are Django accounts: *requesters* submit and see / cancel their own; *operators* see every request and approve,
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (25).
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (26).
 
-Note: a VLAN added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift
+Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift
 report shows it, and `lab.sh configure` (lab.conf) would not remove it (additive).
 
 ## External IPAM: phpIPAM (node `ipam`)

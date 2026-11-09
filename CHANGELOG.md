@@ -2,6 +2,23 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0] - 2026-11-09
+
+### Added
+- Self-service *Set up a load balancer to peer with the fabric* is automated: the form picks a load balancer from
+  Nautobot (switch pair and VRF from its cabling); the worker writes the peering to Nautobot (`lb_peerings`, VLAN,
+  prefixes), runs evpn-3tier-switches (peering VLAN + prefix-filtered eBGP on the pair) and evpn-3tier-loadbalancers
+  (peering VLAN, VIPs on lo, BIRD 2.17 from bundled apks), records it in phpIPAM, and checks BGP, the VIP route and HTTP
+  to the VIP. Proven with request #3: lb1 AS 65310, VLAN 150, 172.16.150.0/29, VIPs 172.16.200.0/28. 26 tests.
+
+### Fixed
+- verify: BFD is checked only for the sessions the lab defines (a half-built load balancer peering failed the switches
+  pipeline).
+- loadbalancers: install bird2-openrc (BIRD's init script is a separate package); loose rp_filter on the peering VLAN
+  (requests arrive on it, replies leave by the tier VLAN — strict filtering dropped them).
+- phpIPAM: the Admin UI login never worked — the loader passed SQL in double quotes and the shell expanded the `$` in
+  the bcrypt hash. Quoted properly; the live password was reset.
+
 ## [0.9.0] - 2026-11-08
 
 ### Added
