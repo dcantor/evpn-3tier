@@ -12,6 +12,7 @@ import RequestPage from "./pages/RequestPage";
 import AllRequests from "./pages/AllRequests";
 import ConfigsPage from "./pages/ConfigsPage";
 import StatePage from "./pages/StatePage";
+import FabricPage from "./pages/FabricPage";
 import "./styles.css";
 
 function useTheme() {
@@ -78,6 +79,7 @@ function Shell() {
             <Route path="/new/:slug" element={<NewRequest />} />
             <Route path="/tools/configs" element={<ConfigsPage />} />
             <Route path="/tools/state" element={<StatePage />} />
+            <Route path="/tools/fabric" element={<FabricPage />} />
             <Route path="/requests" element={session.is_operator ? <AllRequests /> : <Navigate to="/" />} />
             <Route path="/approvals" element={session.can_approve ? <AllRequests pendingOnly /> : <Navigate to="/" />} />
             <Route path="/requests/:id" element={<RequestPage />} />

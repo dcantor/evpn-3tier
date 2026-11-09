@@ -116,3 +116,34 @@ export function saveText(filename: string, text: string) {
   const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ---- fabric dashboard ----------------------------------------------------------------------------------------------------
+export type Kpi = { key: string; label: string; value: string; detail: string; tone?: "ok" | "warn" | "bad" };
+export type FabricDevice = { name: string; role: string; rack: string | null; model: string; manufacturer: string; platform: string | null;
+  status: string | null; mgmt_ip: string; asn: number | null; ports: number };
+export type FabricVrf = { name: string; l3vni: number; l3vlan: number; table: number; vlans: number[]; subnets: string[]; transit: string[];
+  peerings: string[]; hosts: string[]; kind: "tier" | "external" };
+export type FabricVlan = { vlan: number; name: string | null; vrf: string; vni: number; gateway: string; subnet: string; on: string[] };
+export type Fabric = {
+  lab: string; source: string; fetched: string; age_s: number;
+  counts: Record<string, number>;
+  roles: { role: string; label: string; count: number; switch: boolean; devices: string[] }[];
+  models: { manufacturer: string; model: string; platform: string | null; count: number; roles: { role: string; label: string; count: number }[] }[];
+  devices: FabricDevice[]; kpis: Kpi[];
+  links: { a: string; a_port: string; b: string; b_port: string; gbps: number; kind: string }[];
+  oversubscription: { device: string; role: string; uplinks: number; uplink_gbps: number; downlinks: number; downlink_gbps: number; ratio: number | null }[];
+  links_by_kind: { kind: string; count: number; gbps: number }[];
+  racks: { rack: string; devices: string[] }[];
+  vrfs: FabricVrf[]; vlans: FabricVlan[]; subnet_kinds: { kind: string; count: number; detail: string }[];
+  protocols: { underlay: string; overlay: string; mtu: number; max_paths: number; vrf_max_paths: number; rt_as: number; anycast_mac: string; asns: number[] };
+  changes: { total: number; done: number; failed: number; open: number; success_rate: number | null; median_s: number | null;
+    by_status: Record<string, number>; by_workflow: Record<string, number>; last_change: { id: number; title: string; at: string } | null };
+};
+export type HealthRow = { device: string; role: string; ok: boolean; error?: string; software?: string | null; uptime_s?: number | null; ms?: number;
+  bgp?: { up: number; total: number; down: string[]; underlay_up: number }; bfd?: { up: number; total: number }; vnis?: number[] | null };
+export type FabricHealth = { kpis: Kpi[]; devices: HealthRow[]; fetched: string; age_s: number };
+
+export const fabricApi = {
+  design: (refresh = false) => call<Fabric>("GET", `/fabric${refresh ? "?refresh=true" : ""}`),
+  health: (refresh = false) => call<FabricHealth>("GET", `/fabric/health${refresh ? "?refresh=true" : ""}`),
+};

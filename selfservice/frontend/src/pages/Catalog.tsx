@@ -33,6 +33,12 @@ export default function Catalog() {
       <h2 className="section-h">Tools <span className="mute small">— instant and read-only, no approval</span></h2>
       <div className="wf-grid">
         <Card className="wf tool">
+          <span className="tool-i"><Icon name="chart" size={22} /></span>
+          <h3>Fabric Dashboard</h3>
+          <p className="mute">The fabric at a glance: switches and their roles, device models, VRFs, VLANs and subnets, a live topology, and KPIs from the design — ECMP width, oversubscription, redundancy, address use — with a live check of BGP, BFD and VNIs against it.</p>
+          <Link to="/tools/fabric" className="btn primary">Open<Icon name="chevron" /></Link>
+        </Card>
+        <Card className="wf tool">
           <span className="tool-i"><Icon name="term" size={22} /></span>
           <h3>View Device Configurations</h3>
           <p className="mute">The running configuration of any switch, firewall or server, fetched live and shown right here — find in it, copy it, download it as a text file, or download several devices at once as a zip. Secrets are redacted.</p>

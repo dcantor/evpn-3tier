@@ -514,3 +514,28 @@ class StandardRuleTests(TestCase):
         self.assertEqual(len(pol), 4); self.assertEqual(pol, pol2)                    # idempotent
         kept, n = fwrules.drop(pol, 42); self.assertEqual((kept, n), (custom, 3))
         self.assertEqual(fwrules.rule_number(42), 1042)
+
+
+class FabricDashboardTests(TestCase):
+    def test_helpers(self):
+        from . import fabric
+        self.assertEqual(fabric._speed("A_10GBASE_T"), 10); self.assertEqual(fabric._speed("A_25GBASE_X_SFP28"), 25); self.assertEqual(fabric._speed("VIRTUAL"), 0)
+        self.assertEqual(fabric._link_kind("leaf", "spine"), "fabric"); self.assertEqual(fabric._link_kind("border", "wan"), "wan")
+        self.assertEqual(fabric._link_kind("fw", "fw"), "sync"); self.assertEqual(fabric._link_kind("leaf", "web"), "access")
+        self.assertEqual(fabric._ratio(30, 20), 1.5); self.assertIsNone(fabric._ratio(30, 0))
+
+    def test_bgp_sessions_counted_once_per_peer(self):
+        import json
+        from . import fabric
+        out = json.dumps({"default": {"ipv4Unicast": {"peers": {"eth1": {"state": "Established"}, "eth2": {"state": "Established"}}},
+                                      "l2VpnEvpn": {"peers": {"eth1": {"state": "Established"}, "eth2": {"state": "Active"}}}},
+                          "web": {"ipv4Unicast": {"peers": {"172.16.110.4": {"state": "Established"}}}}})
+        s = fabric._bgp(out)
+        self.assertEqual(len(s), 3)
+        self.assertEqual(sorted((x["vrf"], x["peer"], x["up"]) for x in s),
+                         [("default", "eth1", True), ("default", "eth2", False), ("web", "172.16.110.4", True)])
+        self.assertIsNone(fabric._bgp("not json"))
+
+    def test_api_requires_login(self):
+        self.assertEqual(self.client.get("/api/fabric").status_code, 401)
+        self.assertEqual(self.client.get("/api/fabric/health").status_code, 401)

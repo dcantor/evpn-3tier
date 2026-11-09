@@ -2,6 +2,18 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.0] - 2026-11-09
+
+### Added
+- Fabric Factory: **Fabric Dashboard** (New request → Tools, `/tools/fabric`; API `GET /api/fabric`, `GET /api/fabric/health`,
+  read-only, no approval). From Nautobot: switches by role, every device by role and model / platform, racks, a topology
+  drawn from the cabling, VRFs (L3 VNI, VLANs, subnets, servers), subnets by kind, uplinks and oversubscription per
+  leaf / border, design parameters. Design KPIs: leaf-to-spine ECMP width, oversubscription, fabric capacity, capacity
+  after a spine failure, dual-homed endpoints, single points of failure, VLAN ID use, 172.16.0.0/16 allocated. Change
+  KPIs from the app's requests (completed, success rate, median change time, open). Live health vs. design over SSH
+  (cached 30 s): devices reachable, spine fabric sessions vs. spine links, BGP and BFD sessions up, VNI consistency
+  across the leaves, software versions, per-device table.
+
 ## [0.18.0] - 2026-11-09
 
 ### Added

@@ -287,3 +287,23 @@ def device_state(request, name: str, cats: str = "interfaces"):
     try: return devices.state(name, [c for c in cats.split(",") if c])
     except Exception as e:                                                    # noqa: BLE001
         raise HttpError(502, f"{name}: {type(e).__name__}: {e}")
+
+
+# ---- fabric dashboard (read-only, no approval) -------------------------------------------------------------------------------
+@api.get("/fabric", tags=["fabric"])
+def fabric_design(request, refresh: bool = False):
+    """The fabric at a glance, from Nautobot: devices by role, models, links, VRFs, VLANs, subnets, design KPIs, change KPIs."""
+    from . import fabric
+    try: return fabric.design(refresh)
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"Nautobot: {type(e).__name__}: {e}")
+
+
+@api.get("/fabric/health", tags=["fabric"])
+def fabric_health(request, refresh: bool = False):
+    """Live health against the design: BGP / BFD sessions, VNIs, software versions, uptime (read-only SSH, cached 30 s)."""
+    from . import fabric
+    audit.info("%s: fabric health%s", request.user, " (refresh)" if refresh else "")
+    try: return fabric.health(refresh)
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"{type(e).__name__}: {e}")
