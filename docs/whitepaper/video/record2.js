@@ -136,6 +136,7 @@ const OVERLAY = `(() => {
   await Promise.all([page.waitForNavigation({ waitUntil: "networkidle2" }), page.click("button[type=submit]")]);
   await page.goto(BASE + "/tools/state", { waitUntil: "domcontentloaded" });
   await ready();
+  const r18 = await api(`/api/requests/${id}`);           // Fabric Factory's API: read while on its origin
   await startRec();
   // ---- proof on the devices: the WAN's routing table --------------------------------------------------------------------
   await caption("Retrieve device state", "Now check from outside the workflow. Ask the <b>WAN router</b> for its routing table and BGP AS paths, live.");
@@ -220,6 +221,15 @@ const OVERLAY = `(() => {
   const k = Object.fromEntries(fab.kpis.map((x) => [x.key, x.value]));
   await caption("Design KPIs", `Worked out from the cabling: <b>${k.ecmp}</b> leaf-to-spine ECMP, <b>${k.oversub}</b> oversubscription, <b>${k.capacity}</b> of fabric capacity, <b>${k.spine_loss}</b> left if a spine fails, <b>${k.dual}</b> of endpoints dual-homed.`);
   await hold(8);
+  await highlight(null);
+  const rec = await api("/api/fabric/reconcile");
+  await page.waitForSelector(".rec-grid", { timeout: 60000 });
+  await scrollToEl(CARD("Sources of truth"), 75);
+  await highlight(CARD("Sources of truth"));
+  await caption("Sources of truth", `phpIPAM and Nautobot, compared: VRFs, VLANs, every subnet with its VRF and VLAN, gateways, assigned addresses, and the plan against its own objects. <b>${rec.summary.matched}/${rec.summary.total}</b> match, <b>${rec.summary.errors}</b> drift.`);
+  await hold(8);
+  await caption("Sources of truth", "Read-only: it reports, it repairs nothing. A request still running shows as <b>in flight</b>, not drift: phpIPAM is written first and released last.");
+  await hold(5.5);
   await highlight(null);
   await scrollToEl(CARD("Topology"), 75);
   await caption("Topology", "The topology, drawn from Nautobot's cables. Hover over a device to trace its links: <b>leaf1</b> goes up to both spines and down to its rack's servers.");
@@ -321,8 +331,19 @@ const OVERLAY = `(() => {
   await caption("Nautobot · Config context evpn-3tier", `…and its <b>Standard Firewall Rules</b> to <b>fw_policy</b>: ICMP to ${subnet} from outside, app and db. The firewalls pipeline renders rules from these entries.`);
   await hold(6.5);
   await highlight(null);
-  await nbGo("/extras/object-changes/?per_page=25");
-  const top8 = await page.evaluate(() => { const rs = [...document.querySelectorAll("main table tbody tr")].slice(0, 8); const a = rs[0].getBoundingClientRect(), b = rs[7].getBoundingClientRect(); return { x: a.left, y: a.top, w: a.width, h: b.bottom - a.top }; });
+  const stg = Object.fromEntries((r18.progress.stages || []).map((x) => [x.key, x]));
+  const t0 = new Date(new Date(stg.nautobot.started).getTime() - 5000).toISOString(), t1 = new Date(new Date(stg.rules.finished).getTime() + 5000).toISOString();
+  // Nautobot's UI list fails on time filters (its API does not): count the newer changes through the API (this page's
+  // session), list enough rows, and frame request #18's: rows n .. n+k-1, newest first
+  const cnt = async (q) => (await api(`/api/extras/object-changes/?limit=1&${q}`)).count;
+  const nNewer = await cnt(`time__gt=${encodeURIComponent(t1)}`);
+  const nMine = await cnt(`time__gte=${encodeURIComponent(t0)}&time__lte=${encodeURIComponent(t1)}`);
+  log("change log: newer", nNewer, "request", nMine);
+  await nbGo(`/extras/object-changes/?per_page=${nNewer + nMine + 14}`);        // older rows below: room to scroll #18's up
+  await page.waitForFunction((k) => document.querySelectorAll("main table tbody tr").length >= k, { timeout: 30000 }, nNewer + nMine);
+  await page.evaluate((n) => { const r = document.querySelectorAll("main table tbody tr")[n]; r.scrollIntoView({ block: "start", behavior: "instant" }); window.scrollBy(0, -170); }, nNewer);
+  await sleep(300);
+  const top8 = await page.evaluate((n, k) => { const rs = [...document.querySelectorAll("main table tbody tr")].slice(n, n + k); const a = rs[0].getBoundingClientRect(), b = rs[rs.length - 1].getBoundingClientRect(); return { x: a.left, y: a.top, w: a.width, h: b.bottom - a.top }; }, nNewer, nMine);
   await boxRect(top8);
   await caption("Nautobot · Change log", `Every write is in Nautobot's change log. Request #${id}, newest first: the plan entry, the VLAN and the prefix created, the prefix tied to its location and VRF, then the firewall rules.`);
   await hold(7.5);
@@ -352,6 +373,80 @@ const OVERLAY = `(() => {
   await caption("Nautobot · GraphQL", `One answer: each leaf with its rack, management address and both uplink cables, and the prefix of VLAN ${vid} with its VRF and VLAN.`);
   await ev(() => { const cms = [...document.querySelectorAll(".CodeMirror")]; const r = cms.find((c) => c.closest(".graphiql-response")) || cms[cms.length - 1]; r.CodeMirror.scrollTo(null, 1e6); });
   await hold(6);
+
+  // ---- the change workflows: the catalog, a live custom firewall rule, a finished server move -----------------------------
+  await caption(null);
+  await card(`<div class="n">NEW</div><h1>Change workflows</h1>
+    <p>Change a VLAN's span, add or remove a custom firewall rule, move a server to another VLAN: approved by an operator, built by the pipelines, proven on the devices.</p>`);
+  await hold(4.5);
+  await page.goto(BASE + "/new", { waitUntil: "domcontentloaded" }); await ready(); await card(null);
+  const wfCard = (t) => `xpath/(//section[contains(@class,'card')][.//h3[normalize-space(.)=${JSON.stringify(t)}]])[1]`;
+  await page.waitForSelector(wfCard("Move a server to another VLAN"));
+  await scrollToEl(wfCard("Change a VLAN's span"), 80);
+  await caption("New request", "Four new change workflows next to Add / Remove a VLAN and load balancer peering. Each one lists, in order, what happens once it is approved.");
+  for (const t of ["Change a VLAN's span", "Add a custom firewall rule", "Remove a custom firewall rule"]) { await highlight(wfCard(t)); await moveTo(wfCard(t), 0.5, 0.15); await hold(1.6); }
+  await highlight(null);
+  await click(`xpath/(//a[contains(@href,'/new/fw-rule') and not(contains(@href,'remove'))])[1]`);
+  await page.waitForSelector("#f-source"); await ready();
+  await caption("Add a custom firewall rule", "Let the <b>web</b> tier reach <b>db1</b> on TCP 6432: from zone, to zone, protocol, destination, port.");
+  for (const [sel, v] of [["#f-source", "web"], ["#f-target", "db"], ["#f-proto", "tcp"]]) { await click(sel); await page.select(sel, v); await hold(0.5); }
+  await type("#f-dest", "172.16.30.11"); await type("#f-port", "6432");
+  await hold(1);
+  await caption("Add a custom firewall rule", "Checked against the live plan before an operator sees it: the destination must be in the db zone, and nothing may already allow it.");
+  await highlight(`xpath/(//section[contains(@class,'card')][.//h2[normalize-space(.)='When it is approved']])[1]`);
+  await hold(5);
+  await highlight(null);
+  await type("#f-reason", "Demo: a maintenance tool on web reads db1 on 6432");
+  await click(byText("button", "Submit for approval"));
+  await page.waitForFunction(() => /\/requests\/\d+$/.test(location.pathname), { timeout: 20000 });
+  const fwId = Number((await page.url()).match(/requests\/(\d+)/)[1]); log("fw rule request", fwId);
+  await ready(); await hold(1.5);
+  await caption("Approval", `Request <b>#${fwId}</b>: the operator approves it.`);
+  await click(byText("button", "Approve")); await hold(1);
+  await click(`xpath/(//footer//button[contains(normalize-space(.), "Approve")])[last()]`); await hold(1);
+  const FWCAP = {
+    "Nautobot": "<b>Nautobot</b>: the rule joins the firewall policy with its own number (500-899), so no other rule is ever renumbered.",
+    "Firewalls pipeline": "<b>evpn-3tier-firewalls</b>: rendered from Nautobot, checked, applied to fw1 and fw2, then the whole lab verified.",
+    "Firewall checks": "<b>Checks</b>: the rule on both firewalls, with its protocol, destination and port.",
+    "Traffic test": "<b>Traffic test</b>: a listener on db1, a real TCP connection from web1, through the firewall.",
+  };
+  speed = 10; await badge("⏩ 10× speed");
+  let lastSt = "", fr;
+  const tw0 = Date.now();
+  while (Date.now() - tw0 < 15 * 60 * 1000) {
+    fr = await api(`/api/requests/${fwId}`);
+    if (["done", "failed"].includes(fr.status)) break;
+    const st = fr.stage || "";
+    if (st && st !== lastSt) { lastSt = st; await caption(`Running · ${st} · ${fr.percent ?? 0}%`, FWCAP[st] || st); }
+    await sleep(2000);
+  }
+  speed = 1; await badge(null); log("fw rule", fr.status);
+  await scrollTo(0); await hold(1.5);
+  const tt = `xpath/(//div[contains(@class,'ev-m')][contains(., 'traffic test')])[1]`;
+  if (await page.$(tt)) {
+    await highlight(tt); await moveTo(tt, 0.1, 0.5);
+    await caption("Done", `Request <b>#${fwId}</b> is done: the rule is on both firewalls, and a TCP connection from web1 to db1:6432 <b>got through</b>.`);
+    await hold(7); await highlight(null);
+  }
+  // a finished move: app1 to VLAN 42 (request #26)
+  await page.goto(BASE + "/requests/26", { waitUntil: "domcontentloaded" }); await ready();
+  await page.waitForSelector("ol.stepper");
+  await highlight("ol.stepper");
+  await caption("Move a server to another VLAN", "Request <b>#26</b> moved <b>app1</b> to VLAN 42. The lab stays whole: both VLANs on its leaves first, then the address moves, then the old VLAN goes and the whole lab is verified.");
+  await hold(8.5);
+  await highlight(null);
+  const tw = `xpath/(//div[contains(@class,'ev-m')][contains(., 'rule for app1')])[1]`;
+  if (await page.$(tw)) {
+    await highlight(tw); await moveTo(tw, 0.1, 0.5);
+    await caption("Move a server to another VLAN", "Its firewall rule <b>followed it</b>: web → app TCP 8080 was allowed to 172.16.20.0/24, so the move added the same rule for app1's new address.");
+    await hold(7.5); await highlight(null);
+  }
+  const ng = `xpath/(//div[contains(@class,'ev-m')][contains(., 'nginx on web1')])[1]`;
+  if (await page.$(ng)) {
+    await highlight(ng); await moveTo(ng, 0.1, 0.5);
+    await caption("Move a server to another VLAN", "nginx on both web servers was re-rendered to send to app1's new address, and the ping test from the WAN passed.");
+    await hold(6); await highlight(null);
+  }
   await caption(null);
   await card(`<div class="brand"><img src="${LOGO}" width="64" height="64">FABRIC FACTORY</div>
     <h1>Intent in, verified change out</h1>
