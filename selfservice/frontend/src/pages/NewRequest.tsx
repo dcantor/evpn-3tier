@@ -142,7 +142,7 @@ export default function NewRequest() {
         </Card>
         <Card title="When it is approved" className="aside-card">
           <ol className="will-do">{spec.will_do.map((w) => <li key={w}>{w}</li>)}</ol>
-          <p className="small mute">The form is checked against the live lab (Nautobot): VLAN IDs, VNIs, ASNs and subnets already in use are refused.</p>
+          <p className="small mute">The form is checked against the live lab (Nautobot, phpIPAM) before it reaches an operator, and again when the worker carries it out.</p>
         </Card>
       </div>
     </div>

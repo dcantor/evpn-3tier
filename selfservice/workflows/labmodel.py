@@ -5,6 +5,7 @@ Nautobot does not answer. Cached for 30 seconds."""
 import ipaddress
 import json
 import logging
+import re
 import subprocess
 import time
 
@@ -17,7 +18,8 @@ log = logging.getLogger(__name__)
 
 QUERY = """{ config_contexts(name: ["evpn-3tier"]) { data }
   devices(location: ["evpn-3tier"]) { name local_config_context_data role { name } rack { name }
-    interfaces { name vrf { name } cable_peer_interface { device { name } } } } }"""
+    interfaces { name vrf { name } cable_peer_interface { device { name } } } }
+  vlans(vlan_group: ["evpn-3tier"]) { vid name } }"""
 
 
 def _from_nautobot():
@@ -33,7 +35,9 @@ def _from_nautobot():
                       "idx": x["local_config_context_data"]["idx"], "asn": x["local_config_context_data"].get("asn"),
                       # a Linux VM: the switches its bond legs are cabled to, and its tier VRF (bond0.<VLAN>)
                       "peers": sorted({strip(i["cable_peer_interface"]["device"]["name"]) for i in ifs if i["name"] in ("eth1", "eth2") and i.get("cable_peer_interface")}),
-                      "vrf": next((i["vrf"]["name"] for i in ifs if i["name"].startswith("bond0.") and i.get("vrf")), None)})
+                      "vrf": next((i["vrf"]["name"] for i in ifs if i["name"].startswith("bond0.") and i.get("vrf")), None),
+                      "vlans": sorted(int(i["name"].split(".")[1]) for i in ifs if re.match(r"^bond0\.\d+$", i["name"]))})
+    ctx = {**ctx, "_vlan_names": {v["vid"]: v["name"] for v in d.get("vlans") or []}}
     return ctx, ev, nodes, "Nautobot"
 
 
@@ -42,6 +46,7 @@ def _from_lab():
     for n in inv["nodes"]:
         n["peers"] = sorted({p["peer"] for p in n["ports"] if p.get("kind") == "access"}) if n.get("net") else []
         n["vrf"] = (n.get("net") or {}).get("vrf")
+        n["vlans"] = [n["net"]["vlan"]] if n.get("net") else []
     return {**inv, "evpn": inv["evpn"]}, inv["evpn"], inv["nodes"], "lab.conf (Nautobot did not answer)"
 
 
@@ -63,8 +68,21 @@ def model():
     lbs = {n["name"]: {"pair": pair_name.get(tuple(sorted(n["peers"]))), "switches": n["peers"], "vrf": n["vrf"],
                        "peering": next((p for p in peerings if p["name"] == n["name"]), None)}
            for n in sorted(nodes, key=lambda n: n["idx"]) if n["role"] == "lb"}
+    # removable VLANs: the plan's tier VLANs, unless the lab's design (lab.conf) has them, hosts sit in them, or they are
+    # the last VLAN of their VRF (its L3 config on the switches would go with it)
+    base = _base_vlans()
+    names = ctx.get("_vlan_names", {})
+    per_vrf = {}
+    for v in ev["vlans"]: per_vrf[v["vrf"]] = per_vrf.get(v["vrf"], 0) + 1
+    vlans = []
+    for v in sorted(ev["vlans"], key=lambda v: v["vlan"]):
+        hosts = sorted(n["name"] for n in nodes if v["vlan"] in (n.get("vlans") or []))
+        why = ("part of the lab's design (lab.conf)" if v["vlan"] in base else f"hosts attached: {', '.join(hosts)}" if hosts
+               else f"the last VLAN of VRF {v['vrf']}" if per_vrf[v["vrf"]] == 1 else None)
+        vlans.append({"vlan": v["vlan"], "name": names.get(v["vlan"]), "vrf": v["vrf"], "vni": v["vni"], "gateway": v["gateway"],
+                      "subnet": str(ipaddress.ip_interface(v["gateway"]).network), "on": v["on"], "blocked": why})
     m = {
-        "lab": ctx.get("lab", "evpn-3tier"), "source": source,
+        "lab": ctx.get("lab", "evpn-3tier"), "source": source, "vlans": vlans,
         "vrfs": [v["name"] for v in ev["vrfs"]],
         "tier_vrfs": [v["name"] for v in ev["vrfs"] if v["name"] != "outside"],
         "vlans_used": sorted({v["vlan"] for v in ev["vlans"]} | {int(t["vlan"]) for t in ev["transit"]} | {v["l3vlan"] for v in ev["vrfs"]} | {p["vlan"] for p in peerings}),
@@ -77,6 +95,15 @@ def model():
     }
     _cache.update(t=time.time(), v=m)
     return m
+
+
+def _base_vlans():
+    """The VLANs of the lab's own design (lab.conf) — never removed by a request."""
+    try:
+        inv = json.loads(subprocess.run([str(settings.LAB_DIR / "lab.sh"), "inventory"], capture_output=True, text=True, timeout=60, check=True).stdout)
+        return {v["vlan"] for v in inv["evpn"]["vlans"]}
+    except Exception as e:                                                    # noqa: BLE001 — unknown: protect everything
+        log.warning("lab.conf VLANs unknown (%s): no VLAN is removable", e); return {0} | set(range(1, 4095))
 
 
 def invalidate():

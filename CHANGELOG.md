@@ -2,6 +2,15 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.0] - 2026-11-09
+
+### Added
+- *Remove a VLAN from the fabric*: pre-flight (not lab.conf's, no hosts, not the VRF's last, phpIPAM holds only the
+  gateway — else refused, nothing changed) -> Nautobot (plan entry, prefix, VLAN object) -> switches pipeline (managed
+  deletions) -> checks (no trace on any switch) -> phpIPAM last (subnet with its gateway address, VLAN). The form lists
+  every VLAN with why it cannot go. Lab model: VLAN names, base (lab.conf) VLANs, hosts per VLAN. Nautobot client:
+  delete. Proven with request #10 (VLAN 44 removed; switches run #19). 43 tests.
+
 ## [0.14.0] - 2026-11-09
 
 ### Changed

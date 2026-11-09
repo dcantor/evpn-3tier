@@ -365,3 +365,66 @@ class AddVlanOrderTests(TestCase):
         ipam = FakeIpam(); self.run_until_nautobot(ipam); n = len(ipam.writes)
         order = self.run_until_nautobot(ipam)
         self.assertIn("nautobot", order); self.assertEqual(len(ipam.writes), n)      # nothing written twice
+
+
+# ---- remove-vlan (0.15.0) ------------------------------------------------------------------------------------------------------
+def _v(vid, vrf, blocked=None, name=None):
+    return {"vlan": vid, "name": name or f"vlan_{vid}_{vrf}", "vrf": vrf, "vni": 10000 + vid, "gateway": f"172.16.{vid}.1/24",
+            "subnet": f"172.16.{vid}.0/24", "on": ["leaves"], "blocked": blocked}
+
+
+LAB_V = {**LAB, "vlans": [_v(10, "web", "part of the lab's design (lab.conf)"), _v(41, "web"), _v(42, "app"), _v(55, "db", "hosts attached: x1")]}
+
+
+@mock.patch("workflows.labmodel.model", return_value=LAB_V)
+class RemoveVlanFormTests(TestCase):
+    def test_valid_and_params(self, _m):
+        f = F.RemoveVlanForm({"vlan": "41", "confirm": "on", "reason": "no longer needed"}); self.assertTrue(f.is_valid(), f.errors)
+        p = f.params(); self.assertEqual((p["vlan_id"], p["name"], p["vni"], p["subnet"]), (41, "vlan_41_web", 10041, "172.16.41.0/24"))
+
+    def test_blocked_and_confirm(self, _m):
+        for vid, why in (("10", "lab's design"), ("55", "hosts attached")):
+            f = F.RemoveVlanForm({"vlan": vid, "confirm": "on", "reason": "x"}); self.assertFalse(f.is_valid()); self.assertIn(why, " ".join(f.errors["vlan"]))
+        f = F.RemoveVlanForm({"vlan": "41", "reason": "x"}); self.assertFalse(f.is_valid()); self.assertIn("confirm", f.errors)
+
+    def test_one_open_removal_per_vlan(self, _m):
+        u = User.objects.create_user("q", password="q-password-123")
+        WorkflowRequest.objects.create(workflow="remove-vlan", title="t", requested_by=u, status="approved", parameters={"vlan_id": 41})
+        f = F.RemoveVlanForm({"vlan": "41", "confirm": "on", "reason": "x"}); self.assertFalse(f.is_valid()); self.assertIn("already removes", str(f.errors["vlan"]))
+
+
+class RemoveVlanModelTests(TestCase):
+    def test_blocked_reasons(self):
+        from . import labmodel
+        ctx = {"lab": "evpn-3tier", "_vlan_names": {41: "vlan_41_web"}, "evpn": {
+            "vlans": [{"vlan": 10, "vrf": "web", "vni": 10010, "gateway": "172.16.10.1/24", "on": ["leaves"]},
+                      {"vlan": 41, "vrf": "web", "vni": 10041, "gateway": "172.16.0.1/24", "on": ["leaves"]},
+                      {"vlan": 44, "vrf": "db", "vni": 10044, "gateway": "172.16.3.1/24", "on": ["leaves"]},
+                      {"vlan": 45, "vrf": "app", "vni": 10045, "gateway": "172.16.4.1/24", "on": ["leaves"]},
+                      {"vlan": 46, "vrf": "app", "vni": 10046, "gateway": "172.16.5.1/24", "on": ["leaves"]}],
+            "vrfs": [], "transit": [], "rt_as": 65500}}
+        nodes = [{"name": "h1", "role": "web", "rack": "r", "idx": 1, "asn": None, "peers": [], "vrf": "app", "vlans": [46]}]
+        labmodel.invalidate()
+        with mock.patch.object(labmodel, "_from_nautobot", return_value=(ctx, ctx["evpn"], nodes, "Nautobot")), \
+             mock.patch.object(labmodel, "_base_vlans", return_value={10}):
+            m = labmodel.model()
+        labmodel.invalidate()
+        b = {v["vlan"]: v["blocked"] for v in m["vlans"]}
+        self.assertIn("lab.conf", b[10]); self.assertIsNone(b[41]); self.assertIn("last VLAN of VRF db", b[44])
+        self.assertIsNone(b[45]); self.assertIn("hosts attached: h1", b[46])
+
+
+class RemoveVlanExecutorTests(TestCase):
+    def test_phpipam_reservations_refuse_before_any_change(self):
+        from . import executors
+        from .progress import NullProgress
+        u = User.objects.create_user("e", password="e-password-123")
+        r = WorkflowRequest.objects.create(workflow="remove-vlan", title="t", requested_by=u, status="running",
+                                           parameters={"vlan_id": 41, "vni": 10041, "vrf": "web", "subnet": "172.16.0.0/24", "gateway": "172.16.0.1/24", "name": "vlan_41_web"})
+        nb = mock.MagicMock(); nb.context.return_value = {"id": "c", "data": {"evpn": {"vlans": [{"vlan": 41, "vrf": "web", "vni": 10041, "gateway": "172.16.0.1/24", "on": ["leaves"]}]}}}
+        ipam = FakeIpam(subnets={"172.16.0.0/24": {"id": 77, "subnet": "172.16.0.0", "mask": "24", "sectionId": "1", "description": "x"}})
+        ipam.addrs[77] = [{"ip": "172.16.0.1"}, {"ip": "172.16.0.20"}]
+        with mock.patch.object(executors, "Nautobot", return_value=nb), mock.patch.object(executors, "Ipam", return_value=ipam), \
+             mock.patch("workflows.labmodel.model", return_value={**LAB_V, "vlans": [_v(41, "web")]}):
+            with self.assertRaisesRegex(RuntimeError, "172.16.0.20"): executors.remove_vlan(r, NullProgress(out=lambda m: None))
+        nb.patch.assert_not_called(); nb.delete.assert_not_called(); self.assertEqual(ipam.writes, [])

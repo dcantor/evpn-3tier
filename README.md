@@ -124,8 +124,7 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   web UI uses (`POST /<repo>/actions/runs/<n>/jobs/0`, log cursors — only new lines), signed in as `lab`.
 - **Classic pages** (the first, server-rendered UI) stay at **/classic/** as a fallback.
 
-- **Catalog** (selfservice/workflows/catalog.py, forms.py): *Add a VLAN to the fabric* (VLAN ID, name, VRF, gateway prefix,
-  leaves or leaves + borders) and *Set up a load balancer to peer with the fabric* (a load balancer from Nautobot — its
+- **Catalog** (selfservice/workflows/catalog.py, forms.py): *Add a VLAN to the fabric*, *Remove a VLAN from the fabric* and *Set up a load balancer to peer with the fabric* (a load balancer from Nautobot — its
   switch pair and VRF follow from its cabling — ASN, peering VLAN and subnet, VIP prefixes, BFD) — both **automated**.
   Forms are checked against **Nautobot** (the
   source of truth; lab.conf if Nautobot does not answer): VLAN IDs and VNIs free, subnets inside 172.16.0.0/16 and
@@ -158,13 +157,21 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   prefixes; 5 checks — both sessions Established with prefixes, the VIP prefix in the VRF on a leaf (EVPN type-5),
   `http://<VIP>/health` from a server in the VRF. Proven: request #3, lb1 AS 65310, VLAN 150 / VNI 10150,
   172.16.150.0/29, VIPs 172.16.200.0/28 (172.16.200.1 answers `lb1 ok` from web1 / web2).
+- **Remove a VLAN, executed** — the mirror of adding one, **phpIPAM last** (its addresses are released only once
+  nothing uses them): 1 pre-flight — the VLAN must be removable: not the lab's design (lab.conf: 10 / 20 / 30), no hosts
+  in it, not the last VLAN of its VRF, and phpIPAM holding nothing in its subnet but the gateway — otherwise refused with
+  nothing changed (the form already says which VLANs cannot go, and why); 2 Nautobot — out of the evpn-3tier plan, its
+  prefix and VLAN object deleted; 3 the switches pipeline — its managed deletions take off every line rendered no more
+  (VLAN-to-VNI, the VLAN interface and anycast gateway, the VLAN on VXLAN, the EVPN VNI, the borders' FABRIC-SUBNETS
+  rule); 4 checks — no trace of the VLAN, its VNI or subnet on any switch; 5 phpIPAM — the subnet (with its gateway
+  address) and the VLAN released. Proven: request #10 removed VLAN 44 (switches run #19).
 - **Statuses**: submitted -> approved -> running -> done / failed (an operator can retry: steps are idempotent), or
   rejected / cancelled. A request running when the worker restarts is marked failed. Every step is in its history.
 - **Users** are Django accounts: *requesters* submit and see / cancel their own; *operators* see every request and approve,
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (38: forms, allocation, phpIPAM-first order and its guards, flows, approval, the log parser,
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (43: forms, allocation, removal, phpIPAM-first order and its guards, flows, approval, the log parser,
   progress, the API); the front end type-checks in its build (`tsc -b`, strict).
 
 Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift

@@ -9,6 +9,12 @@ add-vlan       (phpIPAM is the source of truth for addressing: it is written fir
   3 Gitea      the evpn-3tier-switches pipeline: inventory from Nautobot, check, apply to the leaves / borders, verify
   4 checks     every switch in the span carries the VLAN (vlan-to-vni) and its anycast gateway; both borders permit the
                subnet to the WAN (prefix-list FABRIC-SUBNETS, called by route-map TO-WAN on the eBGP sessions to the WAN)
+remove-vlan    (the mirror of add-vlan; phpIPAM last: addresses are released only once nothing uses them)
+  1 pre-flight removable (not lab.conf's, no hosts, not its VRF's last), phpIPAM holds only the gateway — else nothing changes
+  2 Nautobot   out of the plan; its prefix and VLAN object deleted
+  3 Gitea      evpn-3tier-switches: managed deletions take off every line rendered no more
+  4 checks     no trace of the VLAN, its VNI or subnet on any switch
+  5 phpIPAM    the subnet (with its gateway address) and the VLAN released
 lb-peering
   1 Nautobot   the peering in the plan (config context lb_peerings), its VLAN and prefixes (peering subnet, VIPs)
   2 Gitea      evpn-3tier-switches: the peering VLAN on the pair and the load balancer's legs, eBGP importing only the VIPs
@@ -234,4 +240,74 @@ def lb_peering(r, log):
             "lb_run_url": runs["evpn-3tier-loadbalancers"]["url"], "lb_run": runs["evpn-3tier-loadbalancers"]["run"]}
 
 
-EXECUTORS = {"add-vlan": add_vlan, "lb-peering": lb_peering}
+def remove_vlan(r, log):
+    """Remove a VLAN and every trace of it — the mirror of add-vlan: pre-flight -> Nautobot -> the switches pipeline
+    (its managed deletions take off what is rendered no more) -> checks -> phpIPAM last (addresses are released only once
+    nothing uses them). Every step idempotent: a retry skips what is already gone."""
+    import re as _re
+    p = r.parameters; vid, vni, vrf = p["vlan_id"], p["vni"], p["vrf"]; net = ipaddress.ip_network(p["subnet"])
+    nb, ip = Nautobot(), Ipam()
+    # ---- 1 pre-flight: refuse before changing anything ---------------------------------------------------------------------
+    log.stage("preflight")
+    ctx = nb.context(); data = ctx["data"]
+    entry = next((v for v in data["evpn"]["vlans"] if v["vlan"] == vid), None)
+    if entry is not None:
+        labmodel.invalidate(); m = labmodel.model()
+        v = next(x for x in m["vlans"] if x["vlan"] == vid)
+        _check(not v["blocked"], f"VLAN {vid} cannot be removed: {v['blocked']} — nothing changed")
+        _check(ipaddress.ip_interface(entry["gateway"]).network == net, f"VLAN {vid}'s subnet in Nautobot is {entry['gateway']}, not {net} as requested — nothing changed")
+    sec = next(x for x in ip.req("GET", "sections") if x["name"] == LOCATION)
+    sub = next((x for x in ip.req("GET", f"subnets/cidr/{net.network_address}/{net.prefixlen}") or [] if x["sectionId"] == sec["id"]), None)
+    if sub is not None:
+        others = [a["ip"] for a in ip.req("GET", f"subnets/{sub['id']}/addresses") or [] if a["ip"] != str(net.network_address + 1)]
+        _check(not others, f"phpIPAM still has addresses in {net} besides the gateway: {', '.join(others[:8])} — release them first; nothing changed")
+    log(f"pre-flight: VLAN {vid} is removable (not the lab's design, no hosts, not VRF {vrf}'s last VLAN); phpIPAM holds only the gateway in {net}")
+    # ---- 2 Nautobot -----------------------------------------------------------------------------------------------------------
+    log.stage("nautobot")
+    if entry is not None:
+        data["evpn"]["vlans"] = [v for v in data["evpn"]["vlans"] if v["vlan"] != vid]
+        nb.patch(f"extras/config-contexts/{ctx['id']}", {"data": data})
+        log(f"Nautobot: VLAN {vid} out of the evpn-3tier plan")
+    else:
+        log(f"Nautobot: VLAN {vid} already out of the plan (a retry)")
+    ns = nb.one("ipam/namespaces", name=LOCATION)
+    pf = nb.one("ipam/prefixes", prefix=str(net), namespace=ns["id"])
+    if pf: nb.delete(f"ipam/prefixes/{pf['id']}"); log(f"Nautobot: prefix {net} deleted")
+    vg = nb.one("ipam/vlan-groups", name=LOCATION); vo = nb.one("ipam/vlans", vid=vid, vlan_group=vg["id"])
+    if vo: nb.delete(f"ipam/vlans/{vo['id']}"); log(f"Nautobot: VLAN object {vid} ({vo['name']}) deleted")
+    labmodel.invalidate()
+    # ---- 3 the switches pipeline: renders from Nautobot; deletes what is rendered no more -----------------------------------------
+    log.stage("switches")
+    ok, num, url = Gitea().dispatch_and_wait("evpn-3tier-switches", log)
+    _check(ok, f"evpn-3tier-switches run #{num} failed — {url}")
+    log(f"evpn-3tier-switches run #{num} succeeded (the VLAN's lines deleted by its managed deletions, verified): {url}")
+    # ---- 4 checks: no trace on any switch ------------------------------------------------------------------------------------
+    log.stage("checks")
+    sys.path.insert(0, str(settings.LAB_DIR / "tools"))
+    from labssh import inventory, run as ssh                                  # noqa: E402
+    inv = inventory()
+    switches = [n["name"] for n in inv["nodes"] if n["role"] in ("leaf", "border", "spine")]
+    pats = [rf"vlan-to-vni {vid} ", rf"\bpeth{vid}\b", rf"allowed-vlan {vid}$", rf"\bvni {vni}\b", rf"FABRIC-SUBNETS rule {vid} ", rf"\bvif {vid}\b",
+            rf"\b{_re.escape(str(net))}\b"]
+    left = {}
+    for sw in switches:
+        _, out = ssh(sw, f"/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration commands | grep -E '{vid}|{vni}|{net.network_address}'", inv=inv, timeout=120)
+        hits = [l for l in out.replace("'", "").splitlines() if any(_re.search(pt, l) for pt in pats)]
+        if hits: left[sw] = hits
+    _check(not left, "still on the switches: " + "; ".join(f"{k}: {v[0]}" + (f" (+{len(v) - 1})" if len(v) > 1 else "") for k, v in left.items()))
+    log(f"on the devices: no trace of VLAN {vid} / VNI {vni} / {net} on {', '.join(switches)}")
+    # ---- 5 phpIPAM last: release the addresses --------------------------------------------------------------------------------
+    log.stage("phpipam")
+    if sub is not None:
+        ip.req("DELETE", f"subnets/{sub['id']}"); log(f"phpIPAM: subnet {net} and its gateway address released")
+    dom = next(d for d in ip.req("GET", "l2domains") if d["name"] == LOCATION)
+    pv = next((x for x in ip.req("GET", f"l2domains/{dom['id']}/vlans") or [] if int(x["number"]) == vid), None)
+    if pv is not None:
+        ip.req("DELETE", f"vlan/{pv['vlanId']}"); log(f"phpIPAM: VLAN {vid} ({pv.get('name')}) released")
+    left_ipam = [x for x in ip.req("GET", f"subnets/cidr/{net.network_address}/{net.prefixlen}") or [] if x["sectionId"] == sec["id"]]
+    _check(not left_ipam, f"phpIPAM still has {net}")
+    log(f"done: VLAN {vid} is gone from the switches, Nautobot and phpIPAM — its ID and subnet are free again")
+    return {"switches_run": num, "switches_run_url": url, "removed": {"vlan": vid, "vni": vni, "subnet": str(net)}}
+
+
+EXECUTORS = {"remove-vlan": remove_vlan, "add-vlan": add_vlan, "lb-peering": lb_peering}

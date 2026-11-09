@@ -52,6 +52,13 @@ class Nautobot:
         if r.status_code >= 400: raise RuntimeError(f"Nautobot PATCH {path}: {r.status_code} {r.text[:300]}")
         return r.json()
 
+    def delete(self, path):
+        """DELETE; False when it was not there (404)."""
+        r = self.s.delete(f"{NAUTOBOT_URL}/api/{path.strip('/')}/", timeout=30)
+        if r.status_code == 404: return False
+        if r.status_code >= 400: raise RuntimeError(f"Nautobot DELETE {path}: {r.status_code} {r.text[:300]}")
+        return True
+
     def graphql(self, query):
         r = self.s.post(f"{NAUTOBOT_URL}/api/graphql/", json={"query": query}, timeout=60); r.raise_for_status()
         body = r.json()

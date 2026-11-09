@@ -81,6 +81,33 @@ class AddVlanForm(RequestForm):
         p["vni"] = 10000 + p["vlan_id"]; p["subnet"] = str(ipaddress.ip_interface(p["gateway"]).network); return p
 
 
+class RemoveVlanForm(RequestForm):
+    """Remove a VLAN the self-service app (or an operator) added: never one of the lab's design (lab.conf), one with
+    hosts in it, or the last VLAN of its VRF. Everything is re-checked when the worker carries it out."""
+    field_order = ["vlan", "confirm", "reason"]
+    vlan = forms.ChoiceField(label="VLAN to remove", help_text="From Nautobot's plan. VLANs that cannot be removed say why.")
+    confirm = forms.BooleanField(label="I understand: the VLAN, its subnet and gateway go from the switches, Nautobot and phpIPAM", required=True,
+                                 help_text="Anything still using the subnet loses its gateway.")
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.fields["vlan"].choices = [(str(v["vlan"]), f"{v['vlan']} {v['name'] or ''} — VRF {v['vrf']}, {v['subnet']}" + (f" — cannot be removed: {v['blocked']}" if v["blocked"] else ""))
+                                       for v in _model().get("vlans", [])]
+
+    def clean_vlan(self):
+        vid = int(self.cleaned_data["vlan"]); v = next(x for x in _model()["vlans"] if x["vlan"] == vid)
+        if v["blocked"]: raise forms.ValidationError(f"VLAN {vid} cannot be removed: {v['blocked']}.")
+        from .models import WorkflowRequest as R
+        if R.objects.filter(workflow="remove-vlan", status__in=("submitted", "approved", "running"), parameters__vlan_id=vid).exists():
+            raise forms.ValidationError(f"An open request already removes VLAN {vid}.")
+        return vid
+
+    def params(self):
+        v = next(x for x in _model()["vlans"] if x["vlan"] == self.cleaned_data["vlan"])
+        return {"vlan_id": v["vlan"], "name": v["name"] or f"VLAN {v['vlan']}", "vrf": v["vrf"], "vni": v["vni"], "gateway": v["gateway"],
+                "subnet": v["subnet"], "on": v["on"]}
+
+
 class LbPeeringForm(RequestForm):
     field_order = ["device", "asn", "peering_vlan", "peering_subnet", "vip_prefixes", "bfd", "reason"]
     device = forms.ChoiceField(label="Load balancer", help_text="A load balancer on the fabric (from Nautobot): it peers with the switch pair it is dual-homed to, in its own VRF.")
