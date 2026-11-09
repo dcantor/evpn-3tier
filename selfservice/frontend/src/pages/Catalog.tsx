@@ -18,6 +18,7 @@ export default function Catalog() {
       <div className="page-h"><div><h1>New request</h1><p className="mute">Pick what you need. Every request is checked against the live lab, approved by an operator, then carried out by the automation.</p></div></div>
       {cat.error && <ErrorNote>{cat.error}</ErrorNote>}
       {!cat.data && !cat.error && <Spinner />}
+      <h2 className="section-h">Changes <span className="mute small">— approved by an operator, built by the automation</span></h2>
       <div className="wf-grid">
         {cat.data?.map((w) => (
           <Card key={w.slug} className="wf">
@@ -28,6 +29,21 @@ export default function Catalog() {
             <Link to={`/new/${w.slug}`} className="btn primary">Start<Icon name="chevron" /></Link>
           </Card>
         ))}
+      </div>
+      <h2 className="section-h">Tools <span className="mute small">— instant and read-only, no approval</span></h2>
+      <div className="wf-grid">
+        <Card className="wf tool">
+          <span className="tool-i"><Icon name="term" size={22} /></span>
+          <h3>View Device Configurations</h3>
+          <p className="mute">The running configuration of any switch, firewall or server, fetched live and shown right here — find in it, copy it, download it as a text file, or download several devices at once as a zip. Secrets are redacted.</p>
+          <Link to="/tools/configs" className="btn primary">Open<Icon name="chevron" /></Link>
+        </Card>
+        <Card className="wf tool">
+          <span className="tool-i"><Icon name="network" size={22} /></span>
+          <h3>Retrieve Device State</h3>
+          <p className="mute">Live operational state of a device: interface status, routing tables, BGP and EVPN, learned MAC addresses, ARP, BFD, VRRP, bonds and services — as tables and command output, with auto-refresh.</p>
+          <Link to="/tools/state" className="btn primary">Open<Icon name="chevron" /></Link>
+        </Card>
       </div>
     </div>
   );

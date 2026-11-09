@@ -1,5 +1,5 @@
 // Shared building blocks: icons, status pills, progress bars, times, cards, dialogs.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { Status } from "./api";
 
 const PATHS: Record<string, string> = {
@@ -27,6 +27,24 @@ export function Icon({ name, size = 16, className = "" }: { name: keyof typeof P
   return (
     <svg className={`icon ${className}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
          strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[name] ?? ""} /></svg>
+  );
+}
+
+/** Fabric Factory's mark: a sawtooth-roof factory whose chimney smoke is a little network fabric. */
+export function Logo({ size = 34 }: { size?: number }) {
+  const id = useId().replace(/:/g, "");
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="Fabric Factory" className="logo-svg">
+      <defs><linearGradient id={`g${id}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#6366f1" /><stop offset="1" stopColor="#a855f7" /></linearGradient></defs>
+      <rect width="48" height="48" rx="12" fill={`url(#g${id})`} />
+      <g className="logo-smoke">
+        <path d="M33.5 15.5 38.5 10.5 43.5 6.5M38.5 10.5 43 14.5M43.5 6.5 43 14.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity=".85" />
+        <circle cx="33.5" cy="15.5" r="2.3" fill="#fff" /><circle cx="38.5" cy="10.5" r="1.9" fill="#fff" /><circle cx="43.5" cy="6.5" r="1.6" fill="#fff" /><circle cx="43" cy="14.5" r="1.4" fill="#fff" />
+      </g>
+      <path d="M6 40V27l8-5v5l8-5v5l8-5v-6.5h7V40z" fill="#fff" />
+      <g fill="#7c5cf0"><rect x="9.5" y="31" width="4" height="4" rx="1" /><rect x="16.5" y="31" width="4" height="4" rx="1" />
+        <rect x="23.5" y="31" width="4" height="4" rx="1" /><rect x="31" y="26" width="3" height="9" rx="1" /></g>
+    </svg>
   );
 }
 

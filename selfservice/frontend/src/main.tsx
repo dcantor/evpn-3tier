@@ -3,13 +3,15 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
 import { api } from "./api";
 import { LiveProvider, useLive, useLiveData } from "./live";
-import { Icon, Spinner } from "./ui";
+import { Icon, Logo, Spinner } from "./ui";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Catalog from "./pages/Catalog";
 import NewRequest from "./pages/NewRequest";
 import RequestPage from "./pages/RequestPage";
 import AllRequests from "./pages/AllRequests";
+import ConfigsPage from "./pages/ConfigsPage";
+import StatePage from "./pages/StatePage";
 import "./styles.css";
 
 function useTheme() {
@@ -42,11 +44,11 @@ function Shell() {
   return (
     <div className="app">
       <aside className={`side ${menu ? "open" : ""}`}>
-        <Link to="/" className="brand"><span className="logo"><Icon name="network" size={18} /></span>
-          <span><strong>evpn-3tier</strong><small>self-service</small></span></Link>
+        <Link to="/" className="brand"><Logo size={36} />
+          <span><strong>Fabric Factory</strong><small>network self-service</small></span></Link>
         <nav>
           <NavLink to="/" end><Icon name="home" />Overview</NavLink>
-          <NavLink to="/new"><Icon name="plus" />New request</NavLink>
+          <NavLink to="/new" className={() => (/^\/(new|tools)/.test(loc.pathname) ? "active" : "")}><Icon name="plus" />New request</NavLink>
           {session.can_approve && <NavLink to="/approvals"><Icon name="inbox" />Approvals{nPending > 0 && <span className="count">{nPending}</span>}</NavLink>}
           {session.is_operator && <NavLink to="/requests" end><Icon name="list" />All requests</NavLink>}
         </nav>
@@ -74,6 +76,8 @@ function Shell() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/new" element={<Catalog />} />
             <Route path="/new/:slug" element={<NewRequest />} />
+            <Route path="/tools/configs" element={<ConfigsPage />} />
+            <Route path="/tools/state" element={<StatePage />} />
             <Route path="/requests" element={session.is_operator ? <AllRequests /> : <Navigate to="/" />} />
             <Route path="/approvals" element={session.can_approve ? <AllRequests pendingOnly /> : <Navigate to="/" />} />
             <Route path="/requests/:id" element={<RequestPage />} />

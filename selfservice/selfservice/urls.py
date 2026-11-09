@@ -9,7 +9,8 @@ from workflows import spa
 from workflows.api import api
 from workflows.stream import stream
 
-admin.site.site_header = "evpn-3tier self-service — admin"
+admin.site.site_header = "Fabric Factory — admin"
+admin.site.site_title = "Fabric Factory"
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/stream", stream, name="stream"),

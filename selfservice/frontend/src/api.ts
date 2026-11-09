@@ -85,3 +85,32 @@ export const api = {
   log: (id: number, repo: string, run: number, step: number) =>
     call<{ step: number; name: string; status: string; lines: string[] }>("GET", `/requests/${id}/pipelines/${repo}/${run}/log?step=${step}`),
 };
+
+// ---- devices: configurations and state (read-only tools) --------------------------------------------------------------
+export type Device = { name: string; role: string; role_label: string; kind: "vyos" | "linux"; mgmt_ip: string; rack: string | null; asn: number | null };
+export type StateCategory = { key: string; label: string; help: string; kinds: string[]; roles: string[] | null };
+export type DeviceList = { devices: Device[]; formats: { key: string; label: string }[]; state: StateCategory[] };
+export type DeviceConfig = { device: string; kind: string; format: string; text: string; files: { path: string; text: string }[]; lines: number; fetched: string; ms: number };
+export type IfRow = { name: string; addresses: string[]; mac: string | null; vrf: string | null; mtu: string | null; admin: string; link: string; description: string | null };
+export type StateResult = { key: string; label: string; sections: { title: string; command: string; output: string }[]; table?: IfRow[] | null };
+export type DeviceState = { device: string; kind: string; role: string; results: StateResult[]; skipped: string[]; fetched: string; ms: number };
+
+export const devicesApi = {
+  list: () => call<DeviceList>("GET", "/devices"),
+  config: (name: string, format = "commands") => call<DeviceConfig>("GET", `/devices/${name}/config?format=${format}`),
+  state: (name: string, cats: string[]) => call<DeviceState>("GET", `/devices/${name}/state?cats=${cats.join(",")}`),
+  zipUrl: (names: string[], format: string) => `/api/devices-configs.zip?format=${format}&names=${names.join(",")}`,
+};
+
+/** Which state categories apply to a device (the same rule as the server's). */
+export function applies(c: StateCategory, d: Device) {
+  if (!c.kinds.includes(d.kind)) return false;
+  return !c.roles || c.roles.includes(d.kind) || c.roles.includes(d.role);
+}
+
+/** Save text as a file in the browser. */
+export function saveText(filename: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text.endsWith("\n") ? text : text + "\n"], { type: "text/plain;charset=utf-8" }));
+  const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

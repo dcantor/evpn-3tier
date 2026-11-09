@@ -2,6 +2,17 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.0] - 2026-11-09
+
+### Added
+- Fabric Factory: the self-service app's new name and logo (a factory whose smoke is a network fabric) — front end,
+  favicon, sign-in, Django admin, API docs, classic pages, the Lab Hub link.
+- New Request screen, Tools: *View Device Configurations* (live, VyOS set / hierarchical or the Linux role's files,
+  find, copy, .txt download, zip of selected / all devices) and *Retrieve Device State* (interfaces table, routes, BGP
+  / BIRD, EVPN, MACs, ARP, BFD, VRRP, bond, services, system; auto-refresh; download). Fixed command list, secrets
+  redacted, retrievals logged. API: GET /api/devices, /api/devices/{name}/config, /api/devices/{name}/state,
+  /api/devices-configs.zip. 48 tests.
+
 ## [0.15.0] - 2026-11-09
 
 ### Added

@@ -92,7 +92,7 @@ report against lab.conf (VyOS repos) -> check mode with diff -> apply -> `lab.sh
 
 `lab.sh configure` / `services` still work (lab.conf); once Nautobot is edited they would push lab.conf's values back.
 
-## Self-service: request workflows (Django API + React front end, `selfservice/`)
+## Fabric Factory — the self-service app (Django API + React front end, `selfservice/`)
 
 **http://192.168.50.231:8120/** — users **request workflows on the lab**; an operator approves; a worker carries them out
 through the lab's own systems — and everyone **watches it happen live**: the stage, each Gitea pipeline's steps, the
@@ -122,6 +122,17 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   stages, and per pipeline run its Gitea steps plus what its live log says (Ansible PLAY / TASK lines, per-host
   results, verify PASS / FAIL). Gitea 1.24 has no API for a running job's log: the worker reads the endpoint Gitea's own
   web UI uses (`POST /<repo>/actions/runs/<n>/jobs/0`, log cursors — only new lines), signed in as `lab`.
+- **Branding**: *Fabric Factory* — logo (selfservice/frontend/public/logo.svg; the same mark in ui.tsx `Logo`): a sawtooth
+  factory whose chimney smoke is a small network fabric. Lab Hub link, Django admin, API docs and the classic pages carry
+  the name.
+- **Tools** (New request screen, read-only, no approval; workflows/devices.py, /api/devices…): **View Device
+  Configurations** — any device's running configuration fetched live (VyOS: set commands or hierarchical; Alpine: its
+  role's files — network, HAProxy, keepalived, BIRD, nginx, the app service, PostgreSQL), find-in, copy, download as
+  .txt, or several / every device as a zip; **Retrieve Device State** — interfaces (a table with up / down badges),
+  routing tables, BGP (FRR, or BIRD on the load balancers), EVPN / VXLAN, learned MACs, ARP, BFD, VRRP, bond / LACP,
+  services, system — per device, categories that apply to its kind and role, optional 15 s auto-refresh, download.
+  Only commands from a fixed list run (the browser names a device and categories, never a command); secrets (password
+  hashes, BGP / VRRP passwords, keys, communities, HAProxy stats auth) are redacted; each retrieval is logged.
 - **Classic pages** (the first, server-rendered UI) stay at **/classic/** as a fallback.
 
 - **Catalog** (selfservice/workflows/catalog.py, forms.py): *Add a VLAN to the fabric*, *Remove a VLAN from the fabric* and *Set up a load balancer to peer with the fabric* (a load balancer from Nautobot — its
@@ -171,7 +182,7 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (43: forms, allocation, removal, phpIPAM-first order and its guards, flows, approval, the log parser,
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (48: forms, allocation, removal, device tools (redaction, parsing), phpIPAM-first order and its guards, flows, approval, the log parser,
   progress, the API); the front end type-checks in its build (`tsc -b`, strict).
 
 Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift

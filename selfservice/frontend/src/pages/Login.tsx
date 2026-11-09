@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../api";
 import { useLive } from "../live";
-import { Icon, Spinner } from "../ui";
+import { Icon, Logo, Spinner } from "../ui";
 
 export default function Login() {
   const { setSession, reloadSession } = useLive();
@@ -22,8 +22,8 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <form className="login card" onSubmit={submit}>
-        <div className="login-brand"><span className="logo big"><Icon name="network" size={26} /></span>
-          <div><h1>evpn-3tier self-service</h1><p className="mute">Request changes to the lab. Operators approve them; the automation carries them out while you watch.</p></div></div>
+        <div className="login-brand"><Logo size={52} />
+          <div><h1>Fabric Factory</h1><p className="mute">Network self-service: request changes to the fabric — operators approve them, the automation builds them while you watch — and look at any device's configuration and state.</p></div></div>
         <label>User name<input autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required /></label>
         <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         {error && <div className="note bad"><Icon name="alert" />{error}</div>}

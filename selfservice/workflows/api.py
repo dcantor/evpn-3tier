@@ -4,6 +4,7 @@ Session authentication (Django's login, cookie) with CSRF on every change: the f
 origin. Live updates: /api/stream (server-sent events, stream.py) says which requests changed; the front end fetches
 them again from here."""
 import threading
+import time
 
 from django.contrib.auth import authenticate, login, logout
 from django.core.exceptions import PermissionDenied
@@ -18,8 +19,8 @@ from . import labmodel, services
 from .catalog import BY_SLUG, CATALOG
 from .models import WorkflowRequest as R
 
-api = NinjaAPI(title="evpn-3tier self-service", version="1", auth=django_auth, urls_namespace="api",
-               description="Request workflows on the evpn-3tier lab; operators approve; a worker carries them out.")
+api = NinjaAPI(title="Fabric Factory", version="1", auth=django_auth, urls_namespace="api",
+               description="Fabric Factory: request workflows on the fabric (operators approve; a worker carries them out), and read device configurations and state.")
 
 
 # ---- serialisation ---------------------------------------------------------------------------------------------------------
@@ -226,3 +227,63 @@ def pipeline_log(request, rid: int, repo: str, run: int, step: int):
     steps = state["currentJob"]["steps"]
     return {"step": step, "name": steps[step]["summary"] if step < len(steps) else "", "status": steps[step]["status"] if step < len(steps) else "",
             "lines": lines}
+
+
+# ---- devices: configurations and state (read-only, no approval) ---------------------------------------------------------------
+import logging                                                                # noqa: E402
+
+from django.http import HttpResponse                                          # noqa: E402
+
+audit = logging.getLogger("workflows.devices")
+
+
+def _dev(name):
+    from . import devices
+    try: return devices.device(name)
+    except KeyError: raise HttpError(404, f"no device {name}")
+
+
+@api.get("/devices", tags=["devices"])
+def list_devices(request):
+    from . import devices
+    return {"devices": devices.devices(), "formats": [{"key": k, "label": v[0]} for k, v in devices.VYOS_FORMATS.items()],
+            "state": devices.state_catalog()}
+
+
+@api.get("/devices/{name}/config", tags=["devices"])
+def device_config(request, name: str, format: str = "commands"):
+    """A device's configuration (VyOS: set commands or hierarchical; Linux: its configuration files). Secrets redacted."""
+    from . import devices
+    _dev(name); audit.info("%s: configuration of %s (%s)", request.user, name, format)
+    try: return devices.config(name, format)
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"{name}: {type(e).__name__}: {e}")
+
+
+@api.get("/devices-configs.zip", tags=["devices"])
+def configs_zip(request, names: str = "", format: str = "commands"):
+    """Several devices' configurations as a zip of text files (names: comma-separated; empty: every device)."""
+    import io
+    import zipfile
+    from . import devices
+    want = [n for n in names.split(",") if n] or [d["name"] for d in devices.devices()]
+    for n in want: _dev(n)
+    audit.info("%s: configurations of %s (%s), zip", request.user, ",".join(want), format)
+    buf = io.BytesIO(); stamp = time.strftime("%Y%m%d-%H%M%S")
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for c in devices.configs(want, format):
+            if "error" in c: z.writestr(f"{c['device']}.ERROR.txt", c["error"] + "\n"); continue
+            z.writestr(f"{c['device']}.txt" if c["kind"] == "vyos" else f"{c['device']}.conf.txt", c["text"] + "\n")
+    r = HttpResponse(buf.getvalue(), content_type="application/zip")
+    r["Content-Disposition"] = f'attachment; filename="fabric-factory-configs-{stamp}.zip"'
+    return r
+
+
+@api.get("/devices/{name}/state", tags=["devices"])
+def device_state(request, name: str, cats: str = "interfaces"):
+    """Live state of a device — categories from GET /devices (interfaces, routes, bgp, evpn, mac, arp, bfd, vrrp, …)."""
+    from . import devices
+    _dev(name); audit.info("%s: state of %s (%s)", request.user, name, cats)
+    try: return devices.state(name, [c for c in cats.split(",") if c])
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"{name}: {type(e).__name__}: {e}")

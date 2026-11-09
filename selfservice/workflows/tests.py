@@ -428,3 +428,59 @@ class RemoveVlanExecutorTests(TestCase):
              mock.patch("workflows.labmodel.model", return_value={**LAB_V, "vlans": [_v(41, "web")]}):
             with self.assertRaisesRegex(RuntimeError, "172.16.0.20"): executors.remove_vlan(r, NullProgress(out=lambda m: None))
         nb.patch.assert_not_called(); nb.delete.assert_not_called(); self.assertEqual(ipam.writes, [])
+
+
+# ---- device tools (0.16.0) -------------------------------------------------------------------------------------------------
+class DeviceToolTests(TestCase):
+    def test_redaction(self):
+        from .devices import redact
+        t = ("set system login user vyos authentication encrypted-password '$6$abc'\n"
+             "set protocols bgp neighbor 1.2.3.4 password 'hunter2'\n"
+             "    authentication { encrypted-password $6$xyz }\n"
+             "    auth_pass s3cret\n  stats auth admin:pw\n"
+             "set service snmp community 'public' authorization ro\nset interfaces ethernet eth1 address '10.0.0.1/31'")
+        r = redact(t)
+        for secret in ("$6$abc", "hunter2", "$6$xyz", "s3cret", "admin:pw", "'public'"): self.assertNotIn(secret, r)
+        self.assertIn("address '10.0.0.1/31'", r)
+
+    def test_parse_vyos_interfaces(self):
+        from .devices import parse_vyos_interfaces
+        out = """Codes: S - State, L - Link, u - Up, D - Down, A - Admin Down
+Interface    IP Address        MAC                VRF        MTU  S/L    Description
+-----------  ----------------  -----------------  -------  -----  -----  -----------
+br0.10       172.16.10.241/24  52:54:00:d0:03:fe  web       1500  u/u    tier web
+             172.16.10.242/24
+eth5         -                 52:54:00:d0:03:06  default   1500  u/D    spare
+"""
+        rows = parse_vyos_interfaces(out)
+        self.assertEqual([r["name"] for r in rows], ["br0.10", "eth5"])
+        self.assertEqual(rows[0]["addresses"], ["172.16.10.241/24", "172.16.10.242/24"]); self.assertEqual(rows[0]["vrf"], "web")
+        self.assertEqual((rows[1]["admin"], rows[1]["link"]), ("up", "down"))
+
+    def test_parse_linux_interfaces(self):
+        from .devices import parse_linux_interfaces
+        out = "lo UNKNOWN 00:00:00:00:00:00 <LOOPBACK,UP>\nbond0 UP 52:54:00:d0:0c:01 <UP>\neth3 DOWN 52:54:00:d0:0c:03 <>\n\nlo UNKNOWN 127.0.0.1/8\nbond0.10@bond0 UP 172.16.10.21/24\n"
+        rows = {r["name"]: r for r in parse_linux_interfaces(out)}
+        self.assertEqual(rows["eth3"]["link"], "down"); self.assertEqual(rows["bond0.10"]["addresses"], ["172.16.10.21/24"])
+
+    def test_categories_apply_by_kind_and_role(self):
+        from .devices import applies
+        leaf = {"kind": "vyos", "role": "leaf"}; spine = {"kind": "vyos", "role": "spine"}; lb = {"kind": "linux", "role": "lb"}; web = {"kind": "linux", "role": "web"}
+        self.assertTrue(applies("evpn", leaf)); self.assertFalse(applies("evpn", spine))
+        self.assertTrue(applies("bgp", lb)); self.assertFalse(applies("bgp", web)); self.assertTrue(applies("bond", web))
+        self.assertFalse(applies("bfd", web)); self.assertTrue(applies("vrrp", lb)); self.assertFalse(applies("vrrp", leaf))
+
+    def test_api_needs_sign_in_and_known_devices(self):
+        from django.test import Client
+        self.assertEqual(Client().get("/api/devices").status_code, 401)
+        u = User.objects.create_user("t", password="t-password-123"); c = Client(); c.force_login(u)
+        devs = [{"name": "leaf1", "role": "leaf", "role_label": "Leaf", "kind": "vyos", "mgmt_ip": "10.18.0.21", "rack": "r1", "asn": 1}]
+        with mock.patch("workflows.devices.devices", return_value=devs), \
+             mock.patch("workflows.devices._run_many", return_value=["set interfaces ethernet eth1 address '10.0.0.1/31'\nset system login user vyos authentication encrypted-password 'x'"]):
+            self.assertEqual(c.get("/api/devices/nosuch/config").status_code, 404)
+            r = c.get("/api/devices/leaf1/config").json()
+            self.assertEqual(r["device"], "leaf1"); self.assertIn("<redacted>", r["text"])
+            z = c.get("/api/devices-configs.zip?names=leaf1")
+            self.assertEqual(z["Content-Type"], "application/zip")
+            import io, zipfile
+            self.assertEqual(zipfile.ZipFile(io.BytesIO(z.content)).namelist(), ["leaf1.txt"])
