@@ -39,7 +39,7 @@ def creds():
 
 
 def sql(q):
-    rc, out = run("ipam", f"doas docker exec -i ipam-db-1 mariadb -uphpipam -pphpipam phpipam -N -e {json.dumps(q)}", timeout=120, inv=inv)
+    rc, out = run("ipam", f"doas docker exec -i ipam-db-1 mariadb -uphpipam -pphpipam phpipam -N -e {shlex.quote(q)}", timeout=120, inv=inv)   # single quotes: a bcrypt hash ($2y$10$...) must reach SQL intact
     if rc: sys.exit(f"SQL failed: {q[:80]}...: {out[-300:]}")
     return out.strip()
 
