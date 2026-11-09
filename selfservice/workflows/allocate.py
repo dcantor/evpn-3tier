@@ -5,7 +5,7 @@
             running) — and whose L2VNI (10000 + ID) is free too
   subnet    phpIPAM's first free /24 under 172.16.0.0/16 (the evpn-3tier section) that overlaps nothing in Nautobot's
             plan nor an open request; the gateway is its first host address
-  name      <VLAN ID>-<VRF>, e.g. 41-app
+  name      vlan_<VLAN ID>_<VRF>, e.g. vlan_41_web (underscores only)
 
 Nothing is reserved at this point: a request holds its VLAN and subnet while it is open (they count as used for the
 next allocation and in validation), and the worker writes them to Nautobot and phpIPAM when it carries the request out."""
@@ -72,7 +72,10 @@ def next_subnet(m=None):
 
 
 def vlan_name(vlan_id, vrf):
-    return f"{vlan_id}-{vrf}"
+    return f"vlan_{vlan_id}_{vrf}"
+
+
+NAME_TEMPLATE = "vlan_{vlan_id}_{vrf}"          # the same, for the front end's live preview
 
 
 def add_vlan(vrf=None):

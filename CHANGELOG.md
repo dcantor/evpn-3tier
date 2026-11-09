@@ -2,6 +2,11 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.1] - 2026-11-09
+
+### Changed
+- *Add a VLAN*: the name is `vlan_<VLAN ID>_<VRF>` (e.g. `vlan_41_web`) — underscores only.
+
 ## [0.12.0] - 2026-11-09
 
 ### Changed

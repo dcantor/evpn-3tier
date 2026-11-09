@@ -50,7 +50,7 @@ class AddVlanFormTests(TestCase):
 
     def test_name_is_computed(self, _m):
         f = F.AddVlanForm({**VLAN_OK, "name": "ignored"}); self.assertTrue(f.is_valid(), f.errors)
-        self.assertEqual(f.params()["name"], "40-app")
+        self.assertEqual(f.params()["name"], "vlan_40_app")
 
     def test_gateway_is_first_host(self, _m):
         f = F.AddVlanForm({**VLAN_OK, "gateway": "172.16.40.254/24"}); self.assertFalse(f.is_valid())
@@ -75,7 +75,7 @@ class AddVlanFormTests(TestCase):
              mock.patch.object(allocate, "free_subnets", return_value=[I.ip_network("172.16.0.0/24"), I.ip_network("172.16.1.0/24")]):
             a = allocate.add_vlan("db")
         # 11 is held by the open request, 12 is in phpIPAM; 172.16.0.0/24 is held too
-        self.assertEqual((a["vlan_id"], a["vni"], a["name"], a["subnet"], a["gateway"]), (13, 10013, "13-db", "172.16.1.0/24", "172.16.1.1/24"))
+        self.assertEqual((a["vlan_id"], a["vni"], a["name"], a["subnet"], a["gateway"]), (13, 10013, "vlan_13_db", "172.16.1.0/24", "172.16.1.1/24"))
 
     def test_outside_vrf_not_offered(self, _m):
         f = F.AddVlanForm({**VLAN_OK, "vrf": "outside"}); self.assertFalse(f.is_valid()); self.assertIn("vrf", f.errors)

@@ -133,8 +133,8 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
 - **Add a VLAN — allocated, not typed** (workflows/allocate.py): the requester picks the **VRF** (first) and the span;
   *Select the next unused VLAN ID* asks the app, which picks the lowest ID above the highest tier VLAN that nothing
   uses (Nautobot's plan, phpIPAM's VLANs, open requests; its VNI free too) and **phpIPAM's first free /24** under
-  172.16.0.0/16 that overlaps nothing — the **gateway is its first host**. The **name is `<VLAN ID>-<VRF>`** (e.g.
-  `41-app`). Nothing is reserved until the worker writes it: an open request (submitted / approved / running) holds its
+  172.16.0.0/16 that overlaps nothing — the **gateway is its first host**. The **name is `vlan_<VLAN ID>_<VRF>`**
+  (e.g. `vlan_41_web`, underscores only). Nothing is reserved until the worker writes it: an open request (submitted / approved / running) holds its
   VLAN and subnet — the next allocation skips them, and submitting re-checks both.
 - **Add a VLAN, executed** (workflows/executors.py, every step idempotent): 1 Nautobot — the VLAN in the evpn-3tier plan
   (config context), the native VLAN and its prefix in the VRF; 2 Gitea — the evpn-3tier-switches pipeline (inventory,

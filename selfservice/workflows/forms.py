@@ -7,6 +7,7 @@ import re
 from django import forms
 
 from . import labmodel
+from .allocate import NAME_TEMPLATE
 
 SLUG = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 
@@ -49,7 +50,7 @@ class AddVlanForm(RequestForm):
     ui = {"vlan_id": {"type": "allocate", "button": "Select the next unused VLAN ID", "endpoint": "/catalog/add-vlan/allocate",
                       "fills": ["vlan_id", "gateway"], "depends": ["vrf"]},
           "gateway": {"type": "computed", "from": "allocation"}}
-    computed = [{"name": "name", "label": "Name", "template": "{vlan_id}-{vrf}", "help": "Automatic: the VLAN ID and the VRF.", "after": "vlan_id"}]
+    computed = [{"name": "name", "label": "Name", "template": NAME_TEMPLATE, "help": "Automatic: vlan_<VLAN ID>_<VRF>.", "after": "vlan_id"}]
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
@@ -75,7 +76,8 @@ class AddVlanForm(RequestForm):
 
     def params(self):
         p = super().params()
-        p["name"] = f"{p['vlan_id']}-{p['vrf']}"
+        from .allocate import vlan_name
+        p["name"] = vlan_name(p["vlan_id"], p["vrf"])
         p["vni"] = 10000 + p["vlan_id"]; p["subnet"] = str(ipaddress.ip_interface(p["gateway"]).network); return p
 
 
