@@ -9,7 +9,8 @@ const SIZE = { platform: [1012, 624], topology: [1012, 662], evpn: [1012, 498], 
   orchestration: [1012, 624], pipeline: [1012, 256], sequence: [1012, 686], states: [1012, 246], form: [1360, 1464],
   dashboard: [2152, 2090], "nb-devices": [2724, 1880], "nb-prefixes": [2724, 1730], "nb-changelog-crop": [1720, 1064], "nb-graphql": [2752, 1192],
   "nb-interfaces": [2724, 1144], "nb-vlans": [2724, 1608],
-  "asn-db": [2160, 2546], "vlan-db": [2160, 2566] };
+  "asn-db": [2160, 2546], "vlan-db": [2160, 2566],
+  "port-form": [2160, 2046], "port-request": [2122, 574] };
 const W = 13.333, L = 0.6, R = W - 0.6, CW = R - L; // margins
 const TOP = 1.75, BOT = 6.8;
 
@@ -542,6 +543,29 @@ const TOP = 1.75, BOT = 6.8;
       tb(s, x + 0.85, y + 0.12, w - 1.0, rh - 0.2, hd, b, { hs: 14, bs: 11.5, valign: "top" });
     }
     s.notes("Two read-only tools next to the Fabric Dashboard. Both read Nautobot's model, the plan the pipelines deploy from, so they are never out of date. The ASN Database groups devices by AS and derives every BGP session of the design from the cabling and the plan: underlay and EVPN on the spine links, firewall transit per VRF, the WAN and the load balancer peerings. The VLAN Database lists every VLAN in the evpn-3tier group, with the self-service request that created it where there is one. Both download as Excel workbooks built with openpyxl.");
+  }
+
+  // 17d Port Provisioning
+  {
+    const s = content("Automation and orchestration", "Port Provisioning", "Enable or disable a leaf port; set a spare port up as access or trunk. Uplinks to the spines are blocked");
+    const f = diagram(s, "port-form", L, TOP, 5.2, BOT - TOP - 0.3, "The Port Provisioning form: leaf1 eth6 enabled as a trunk with VLANs 41 and 47 chosen as chips");
+    s.text("The form: a spare port as a trunk", { x: f.x, y: f.y + f.h + 0.04, w: f.w, h: 0.26, fontSize: 11, color: C.text2, margin: 0 });
+    const x = f.x + f.w + 0.4, w = R - x;
+    const rows = [["LuBan", C.accent4, "Uplinks to the spines", "Blocked: listed as such, refused by the form and by the worker"],
+      ["LuServer", C.accent1, "A server's bond leg", "Enable or disable — disabled only while its other leg is up (Nautobot and live); its VLAN follows the server"],
+      ["LuPlug", C.accent3, "Spare ports eth6, eth7", "Access (one VLAN, untagged), trunk (chosen VLANs, tagged) or no VLANs; only VLANs the leaves carry"]];
+    const rh = 0.86, gap = 0.08;
+    for (const [i, [g, c, hd, b]] of rows.entries()) {
+      const y = TOP + i * (rh + gap);
+      card(s, x, y, w, rh, c, 90);
+      await badge(s, x + 0.18, y + 0.18, 0.5, g, c);
+      tb(s, x + 0.82, y + 0.08, w - 0.95, rh - 0.12, hd, b, { hs: 13.5, bs: 11.5, valign: "middle" });
+    }
+    const y2 = TOP + 3 * (rh + gap) + 0.12;
+    s.text("Intent in Nautobot's interface fields → switches pipeline (verify) → the port's state and bridge VLANs checked → ping from the WAN", { x, y: y2, w, h: 0.5, fontSize: 11.5, color: C.text1, margin: 0 });
+    const r = diagram(s, "port-request", x, y2 + 0.58, w, BOT - y2 - 0.9, "Request #34 done: pre-flight, Nautobot, switches pipeline, port checks, ping test");
+    s.text("Request #34: leaf1 eth6 a trunk for VLANs 41 and 47, about three minutes", { x, y: r.y + r.h + 0.04, w, h: 0.26, fontSize: 11, color: C.text2, margin: 0 });
+    s.notes("Every leaf got two spare ports, eth6 and eth7, for this workflow; they start disabled in Nautobot. The intent lives in Nautobot's native interface fields: enabled, mode, untagged VLAN, tagged VLANs and description. The switches pipeline renders disable, native-vlan for access or allowed-vlan per VLAN for a trunk, and its managed deletions remove whatever no longer applies. Tested live: a trunk, then access, then disabled; web1's leg disabled and re-enabled with web1 serving throughout; an uplink change refused.");
   }
 
   // 18 Sequence
