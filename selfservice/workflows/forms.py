@@ -379,10 +379,11 @@ class MoveServerForm(RequestForm):
 
 
 # ---- port provisioning --------------------------------------------------------------------------------------------------------
-PORT_STATES = [("enabled", "Enabled"), ("disabled", "Disabled (shut down)")]
-PORT_MODES = [("", "— leave as it is —"), ("access", "Access: one VLAN, untagged"), ("tagged", "Trunk: chosen VLANs, tagged"),
-              ("none", "No VLANs (unprovisioned; the port must be disabled)")]
+PORT_STATES = [("enabled", "Enabled"), ("disabled", "Disabled (shut down; keeps its configuration)"),
+               ("default", "Default: disabled, no configuration (spare ports)")]
+PORT_MODES = [("", "— leave as it is (or from the profile) —"), ("access", "Access: one VLAN, untagged"), ("tagged", "Trunk: chosen VLANs, tagged")]
 UPLINK = "uplinks to the spines carry the whole fabric: they cannot be changed here"
+SPARE_DESC = "spare port (Port Provisioning)"
 
 
 def leaf_vlans(m):
@@ -395,40 +396,64 @@ def port_partner(m, p):
     return next((x for x in m.get("ports", []) if x["kind"] == "access" and x["peer"] == p["peer"] and x["switch"] != p["switch"]), None)
 
 
+def port_cfg(mode, access, trunk, native=None):
+    if mode == "access": return f"access VLAN {access}"
+    if mode == "tagged": return f"trunk VLANs {', '.join(map(str, trunk))}" + (f", untagged {native}" if native else "")
+    return "no VLANs"
+
+
 def port_label(p):
     state = "enabled" if p["enabled"] else "disabled"
     if p["kind"] == "fabric": return f"{p['switch']} {p['name']} — uplink to {p['peer']}: blocked"
     if p["kind"] == "access": return f"{p['switch']} {p['name']} — {p['peer']}'s bond leg ({state})"
-    cfg = (f", access VLAN {p['untagged_vlan']}" if p["mode"] == "access" else f", trunk VLANs {', '.join(map(str, p['tagged_vlans']))}" if p["mode"] == "tagged" else ", no VLANs")
-    return f"{p['switch']} {p['name']} — spare port ({state}{cfg})"
+    cfg = port_cfg(p["mode"], p["untagged_vlan"], p["tagged_vlans"], p["untagged_vlan"] if p["mode"] == "tagged" else None)
+    who = f", {p['application']['app_id']}" if p.get("application") else ""
+    prof = f", profile {p['profile']}" if p.get("profile") else ""
+    return f"{p['switch']} {p['name']} — spare port ({state}, {cfg}{prof}{who})"
 
 
-def port_summary(state, mode, access, trunk):
-    s = "enabled" if state == "enabled" else "disabled"
-    if mode == "access": s += f", access VLAN {access}"
-    elif mode == "tagged": s += f", trunk VLANs {', '.join(map(str, trunk))}"
-    return s
+def port_summary(state, mode, access, trunk, native=None):
+    s = {"enabled": "enabled", "disabled": "disabled", "default": "default (disabled, no configuration)"}[state]
+    return s if state == "default" or not mode else f"{s}, {port_cfg(mode, access, trunk, native)}"
+
+
+def compose_description(app, text):
+    """What the switch shows: '<APP-ID> <application> — <what is plugged in>'."""
+    text = (text or "").strip()
+    if not app: return text or SPARE_DESC
+    return f"{app['app_id']} {app['name']}" + (f" — {text}" if text and not text.startswith(app["app_id"]) else "")
 
 
 class PortForm(RequestForm):
-    """A leaf port: enable or disable it; on a spare port, make it an access port (one VLAN, untagged) or a trunk (the
-    chosen VLANs, tagged). Uplinks to the spines are refused. A server's bond leg can only be enabled or disabled — and
-    disabled only while its other leg is up, so the server is never cut off; its VLAN follows the server (Move a server)."""
-    field_order = ["port", "state", "mode", "access_vlan", "trunk_vlans", "description", "reason"]
+    """A leaf port: enable it, disable it, or put it back to its default (disabled, no configuration). A spare port gets
+    its configuration from a port profile or by hand — access (one VLAN, untagged) or trunk (VLANs tagged, optionally one
+    untagged) — and an owner: the application it belongs to. Uplinks to the spines are refused. A server's bond leg can
+    only be enabled or disabled — disabled only while its other leg is up — and its VLAN follows the server."""
+    field_order = ["port", "state", "profile", "mode", "access_vlan", "trunk_vlans", "native_vlan", "application", "description", "reason"]
     port = forms.ChoiceField(label="Port", help_text="Every leaf port. Uplinks to the spines are listed but blocked; border leaves and spines are not offered.")
-    state = forms.ChoiceField(label="Admin state", choices=PORT_STATES)
-    mode = forms.ChoiceField(label="Mode", choices=PORT_MODES, required=False, help_text="Spare ports only. A server's bond leg keeps the VLAN its server tags.")
+    state = forms.ChoiceField(label="Action", choices=PORT_STATES, help_text="Default takes a spare port back to disabled with no VLANs, profile, owner or description.")
+    profile = forms.ChoiceField(label="Port profile", required=False, help_text="A named preset made by the operators: it sets the mode and the VLANs. Or leave it empty and set them by hand.")
+    mode = forms.ChoiceField(label="Mode", choices=PORT_MODES, required=False, help_text="Spare ports only, when no profile is chosen.")
     access_vlan = forms.ChoiceField(label="Access VLAN", required=False, help_text="Access mode: the one VLAN, untagged.")
     trunk_vlans = forms.MultipleChoiceField(label="Trunk VLANs", required=False, help_text="Trunk mode: the VLANs allowed, tagged. Only VLANs the leaves carry.")
-    description = forms.CharField(label="Description", required=False, max_length=60, help_text="What is plugged in (spare ports), e.g. 'backup appliance'.")
+    native_vlan = forms.ChoiceField(label="Trunk untagged (native) VLAN", required=False, help_text="Trunk mode, optional: one VLAN carried untagged.")
+    application = forms.ChoiceField(label="Application (owner)", required=False, help_text="Who owns the port: an application and its owner team. Required to enable a spare port.")
+    description = forms.CharField(label="Description", required=False, max_length=60, help_text="What is plugged in, e.g. 'backup appliance'. The switch shows '<APP-ID> <application> — <this>'.")
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
+        from . import ownership
         m = _model()
         self.fields["port"].choices = [(f"{p['switch']}|{p['name']}", port_label(p)) for p in m.get("ports", [])]
         vl = [(str(v["vlan"]), f"{v['vlan']} {v['name'] or ''} ({v['vrf']}, {v['subnet']})") for v in leaf_vlans(m)]
         self.fields["access_vlan"].choices = [("", "—")] + vl
+        self.fields["native_vlan"].choices = [("", "— none —")] + vl
         self.fields["trunk_vlans"].choices = vl
+        self.fields["profile"].choices = [("", "— none: set it by hand —")] + [(p["name"], f"{p['name']} — {ownership.profile_summary(p)}") for p in m.get("port_profiles", [])]
+        try: apps = ownership.applications()
+        except Exception: apps = []                                          # noqa: BLE001
+        self.fields["application"].choices = [("", "—")] + [(a["app_id"], a["label"] + (f" (owner: {a['owner']['name']})" if a.get("owner") else "")) for a in apps]
+        self._apps = {a["app_id"]: a for a in apps}
 
     def clean(self):
         c = super().clean()
@@ -438,47 +463,127 @@ class PortForm(RequestForm):
         if p is None: raise forms.ValidationError(f"{sw} {name} is not a leaf port in Nautobot.")
         if p["kind"] == "fabric": raise forms.ValidationError(f"{sw} {name} is an uplink to {p['peer']}: {UPLINK}.")
         if p["kind"] not in (None, "access"): raise forms.ValidationError(f"{sw} {name} ({p['kind']}) cannot be provisioned here.")
-        enabled = c["state"] == "enabled"; mode = c.get("mode") or ""; access = c.get("access_vlan") or ""; trunk = sorted(int(v) for v in c.get("trunk_vlans") or [])
+        state = c["state"]; mode = c.get("mode") or ""; prof_name = c.get("profile") or ""
+        access = c.get("access_vlan") or ""; trunk = sorted(int(v) for v in c.get("trunk_vlans") or []); native = c.get("native_vlan") or ""
+        app_id = c.get("application") or ""; app = self._apps.get(app_id) if app_id else None
+        manual = bool(mode or access or trunk or native)
+        prof = None
         if p["kind"] == "access":
-            if mode or access or trunk:
-                raise forms.ValidationError(f"{sw} {name} is {p['peer']}'s bond leg: its VLAN follows the server — only enable or disable it here (Move a server changes the VLAN).")
-            if not enabled:
+            if state == "default": raise forms.ValidationError(f"{sw} {name} is {p['peer']}'s bond leg: its default is cabled and enabled — use Enable.")
+            if manual or prof_name or app_id:
+                raise forms.ValidationError(f"{sw} {name} is {p['peer']}'s bond leg: its VLAN and owner follow the server — only enable or disable it here (Move a server changes the VLAN).")
+            if state == "disabled":
                 other = port_partner(m, p)
                 if other is None or not other["enabled"]:
                     raise forms.ValidationError(f"Disabling {sw} {name} would cut {p['peer']} off: its other leg ({other['switch'] + ' ' + other['name'] if other else 'none'}) is down.")
-            mode, access_v, trunk = p["mode"], p["untagged_vlan"], p["tagged_vlans"]
+            mode, access_v, trunk_v, native_v, app, prof_name = p["mode"], p["untagged_vlan"], p["tagged_vlans"], None, None, None
+        elif state == "default":
+            if manual or prof_name or app_id: raise forms.ValidationError("Default clears the port: leave the profile, mode, VLANs and application empty.")
+            mode, access_v, trunk_v, native_v, app, prof_name = None, None, [], None, None, None
         else:
-            if not mode:                                   # keep what the port has
-                mode, access_v, trunk = p["mode"], p["untagged_vlan"], p["tagged_vlans"]
-                if enabled and not mode: raise forms.ValidationError("An enabled spare port needs a mode: access (one VLAN) or trunk (VLANs).")
-            elif mode == "none":
-                if enabled: raise forms.ValidationError("An enabled spare port needs a mode: disable it to take its VLANs away.")
-                if access or trunk: raise forms.ValidationError("No VLANs: leave the access VLAN and the trunk VLANs empty.")
-                mode, access_v, trunk = None, None, []
+            if prof_name:
+                if manual: raise forms.ValidationError(f"Profile {prof_name} sets the mode and the VLANs: leave them empty, or choose no profile.")
+                prof = next((x for x in m.get("port_profiles", []) if x["name"] == prof_name), None)
+                if prof is None: raise forms.ValidationError(f"There is no profile {prof_name}.")
+                mode, access_v, trunk_v, native_v = prof["mode"], prof.get("access_vlan"), list(prof.get("trunk_vlans") or []), prof.get("native_vlan")
+            elif not mode:                                                   # keep what the port has
+                mode, access_v, trunk_v = p["mode"], p["untagged_vlan"] if p["mode"] == "access" else None, p["tagged_vlans"]
+                native_v = p["untagged_vlan"] if p["mode"] == "tagged" else None
+                prof_name = p.get("profile")
+                if state == "enabled" and not mode: raise forms.ValidationError("An enabled spare port needs a configuration: a profile, or a mode (access or trunk).")
             elif mode == "access":
                 if not access: raise forms.ValidationError("Access mode: choose the access VLAN.")
-                if trunk: raise forms.ValidationError("Access mode carries one VLAN: leave the trunk VLANs empty.")
-                access_v, trunk = int(access), []
+                if trunk or native: raise forms.ValidationError("Access mode carries one VLAN: leave the trunk VLANs and the native VLAN empty.")
+                access_v, trunk_v, native_v = int(access), [], None
             else:
                 if not trunk: raise forms.ValidationError("Trunk mode: choose at least one VLAN.")
-                if access: raise forms.ValidationError("Trunk mode: leave the access VLAN empty (the chosen VLANs are tagged).")
-                access_v = None
+                if access: raise forms.ValidationError("Trunk mode: leave the access VLAN empty (use the native VLAN for one untagged VLAN).")
+                access_v, trunk_v, native_v = None, trunk, int(native) if native else None
+                if native_v in trunk_v: raise forms.ValidationError(f"VLAN {native_v} cannot be both tagged and the untagged native VLAN.")
             ok = {v["vlan"] for v in leaf_vlans(m)}
-            bad = [v for v in ([access_v] if mode == "access" else trunk if mode == "tagged" else []) if v not in ok]
+            bad = [v for v in ([access_v] if mode == "access" else trunk_v + ([native_v] if native_v else []) if mode == "tagged" else []) if v not in ok]
             if bad: raise forms.ValidationError(f"VLAN(s) {', '.join(map(str, bad))} are not on the leaves.")
-        if (enabled, mode or None, access_v if mode == "access" else None, trunk if mode == "tagged" else []) == \
-           (p["enabled"], p["mode"], p["untagged_vlan"] if p["mode"] == "access" else None, p["tagged_vlans"] if p["mode"] == "tagged" else []) \
-           and (c.get("description") or "") in ("", p["description"]):
-            raise forms.ValidationError(f"{sw} {name} is already {port_summary(c['state'], mode, access_v, trunk)}: nothing to change.")
+            if app is None and not app_id: app = p.get("application")          # keep the owner it has
+            if state == "enabled" and app is None: raise forms.ValidationError("An enabled spare port needs an owner: choose its application.")
+        enabled = state == "enabled"
+        untagged = access_v if mode == "access" else native_v if mode == "tagged" else None
+        desc = compose_description(app, c.get("description") or ("" if state == "default" else (p["description"].split(" — ", 1)[-1] if p.get("application") else
+                                                                                                  ("" if p["description"] == SPARE_DESC else p["description"]))))
+        if p["kind"] == "access": desc = p["description"]
+        now = (p["enabled"], p["mode"], p["untagged_vlan"], p["tagged_vlans"] if p["mode"] == "tagged" else [], p.get("profile"), (p.get("application") or {}).get("app_id"), p["description"])
+        new = (enabled, mode or None, untagged, trunk_v if mode == "tagged" else [], prof_name or None, (app or {}).get("app_id"), desc)
+        if now == new: raise forms.ValidationError(f"{sw} {name} is already {port_summary(state, mode, access_v, trunk_v, native_v)}: nothing to change.")
         if _open("port", switch=sw, port=name).exists(): raise forms.ValidationError(f"An open request already changes {sw} {name}.")
-        c.update(_p=p, _mode=mode or None, _access=access_v if mode == "access" else None, _trunk=trunk if mode == "tagged" else [])
+        c.update(_p=p, _mode=mode or None, _untagged=untagged, _trunk=trunk_v if mode == "tagged" else [], _native=native_v, _access=access_v,
+                 _profile=prof_name or None, _app=app, _desc=desc)
         return c
 
     def params(self):
         c = self.cleaned_data; p = c["_p"]; m = _model(); other = port_partner(m, p) if p["kind"] == "access" else None
-        desc = (c.get("description") or "").strip() or p["description"]
+        app = c["_app"]
         return {"switch": p["switch"], "port": p["name"], "kind": "server leg" if p["kind"] == "access" else "spare", "peer": p["peer"],
-                "enabled": c["state"] == "enabled", "mode": c["_mode"], "access_vlan": c["_access"], "trunk_vlans": c["_trunk"], "description": desc,
-                "partner": f"{other['switch']} {other['name']}" if other else None,
-                "before": port_summary("enabled" if p["enabled"] else "disabled", p["mode"], p["untagged_vlan"], p["tagged_vlans"]),
-                "after": port_summary(c["state"], c["_mode"], c["_access"], c["_trunk"])}
+                "action": c["state"], "enabled": c["state"] == "enabled", "mode": c["_mode"], "access_vlan": c["_access"] if c["_mode"] == "access" else None,
+                "trunk_vlans": c["_trunk"], "native_vlan": c["_native"] if c["_mode"] == "tagged" else None, "untagged_vlan": c["_untagged"],
+                "profile": c["_profile"], "application": app and {k: app[k] for k in ("id", "app_id", "name")}, "owner": app and app.get("owner") and app["owner"]["name"],
+                "description": c["_desc"], "partner": f"{other['switch']} {other['name']}" if other else None,
+                "before": port_summary("enabled" if p["enabled"] else "disabled", p["mode"], p["untagged_vlan"], p["tagged_vlans"],
+                                       p["untagged_vlan"] if p["mode"] == "tagged" else None),
+                "after": port_summary(c["state"], c["_mode"], c["_access"], c["_trunk"], c["_native"])
+                         + (f", profile {c['_profile']}" if c["_profile"] and c["state"] != "default" else "")
+                         + (f", {app['app_id']}" if app and c["state"] != "default" else "")}
+
+
+class PortProfileForm(RequestForm):
+    """Create, change or delete a port profile: a named preset for spare ports (mode, VLANs, optional native VLAN).
+    Changing one can re-apply it to every port that uses it, in the same request; one in use cannot be deleted."""
+    field_order = ["action", "name", "description", "mode", "access_vlan", "trunk_vlans", "native_vlan", "reapply", "reason"]
+    action = forms.ChoiceField(label="Action", choices=[("create", "Create a profile"), ("update", "Change a profile"), ("delete", "Delete a profile")])
+    name = forms.CharField(label="Name", max_length=30, help_text="Lower case, digits and dashes, e.g. web-access. For a change or a delete: an existing profile.")
+    description = forms.CharField(label="Description", required=False, max_length=80)
+    mode = forms.ChoiceField(label="Mode", required=False, choices=[("", "—"), ("access", "Access: one VLAN, untagged"), ("tagged", "Trunk: chosen VLANs, tagged")])
+    access_vlan = forms.ChoiceField(label="Access VLAN", required=False)
+    trunk_vlans = forms.MultipleChoiceField(label="Trunk VLANs", required=False)
+    native_vlan = forms.ChoiceField(label="Trunk untagged (native) VLAN", required=False)
+    reapply = forms.BooleanField(label="Re-apply a changed profile to every port that uses it", required=False, initial=True)
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        vl = [(str(v["vlan"]), f"{v['vlan']} {v['name'] or ''} ({v['vrf']}, {v['subnet']})") for v in leaf_vlans(_model())]
+        self.fields["access_vlan"].choices = [("", "—")] + vl
+        self.fields["native_vlan"].choices = [("", "— none —")] + vl
+        self.fields["trunk_vlans"].choices = vl
+
+    def clean(self):
+        c = super().clean()
+        if "action" not in c or not c.get("name"): return c
+        m = _model(); name = c["name"].strip().lower(); act = c["action"]
+        if not SLUG.match(name): raise forms.ValidationError("Name: lower case letters, digits and dashes, starting with a letter (2-31).")
+        profs = {p["name"]: p for p in m.get("port_profiles", [])}
+        users = [f"{p['switch']} {p['name']}" for p in m.get("ports", []) if p.get("profile") == name]
+        if act == "create" and name in profs: raise forms.ValidationError(f"Profile {name} exists: choose Change.")
+        if act in ("update", "delete") and name not in profs: raise forms.ValidationError(f"There is no profile {name}.")
+        if act == "delete":
+            if users: raise forms.ValidationError(f"Profile {name} is in use on {', '.join(users)}: give those ports another profile (or Default them) first.")
+            c.update(name=name, _prof=profs[name], _users=[]); return c
+        mode = c.get("mode") or ""; access = c.get("access_vlan") or ""; trunk = sorted(int(v) for v in c.get("trunk_vlans") or []); native = c.get("native_vlan") or ""
+        if mode == "access":
+            if not access or trunk or native: raise forms.ValidationError("Access: one access VLAN, no trunk or native VLANs.")
+            prof = {"name": name, "description": c.get("description") or "", "mode": "access", "access_vlan": int(access), "trunk_vlans": [], "native_vlan": None}
+        elif mode == "tagged":
+            if not trunk or access: raise forms.ValidationError("Trunk: at least one trunk VLAN, no access VLAN.")
+            if native and int(native) in trunk: raise forms.ValidationError(f"VLAN {native} cannot be both tagged and the native VLAN.")
+            prof = {"name": name, "description": c.get("description") or "", "mode": "tagged", "access_vlan": None, "trunk_vlans": trunk, "native_vlan": int(native) if native else None}
+        else:
+            raise forms.ValidationError("Choose the mode: access or trunk.")
+        if act == "update" and prof == profs[name]: raise forms.ValidationError(f"Profile {name} is already exactly this: nothing to change.")
+        if _open("port-profile", name=name).exists() or _open("port").filter(parameters__profile=name).exists():
+            raise forms.ValidationError(f"An open request already uses or changes profile {name}.")
+        c.update(name=name, _prof=prof, _users=users if act == "update" and c.get("reapply") else [])
+        return c
+
+    def params(self):
+        from .ownership import profile_summary
+        c = self.cleaned_data
+        return {"action": c["action"], "name": c["name"], "profile": c["_prof"], "ports": c["_users"],
+                "summary": {"create": "create", "update": "change to", "delete": "delete"}[c["action"]] + ("" if c["action"] == "delete" else " " + profile_summary(c["_prof"]))
+                           + (f", re-applied to {len(c['_users'])} port(s)" if c["_users"] else "")}

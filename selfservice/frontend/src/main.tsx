@@ -14,6 +14,7 @@ import ConfigsPage from "./pages/ConfigsPage";
 import StatePage from "./pages/StatePage";
 import FabricPage from "./pages/FabricPage";
 import { AsnPage, VlanPage } from "./pages/DbTools";
+import { ApplicationsPage, ProfilesPage } from "./pages/OwnerTools";
 import "./styles.css";
 
 function useTheme() {
@@ -83,6 +84,8 @@ function Shell() {
             <Route path="/tools/fabric" element={<FabricPage />} />
             <Route path="/tools/asns" element={<AsnPage />} />
             <Route path="/tools/vlans" element={<VlanPage />} />
+            <Route path="/tools/applications" element={<ApplicationsPage />} />
+            <Route path="/tools/port-profiles" element={<ProfilesPage />} />
             <Route path="/requests" element={session.is_operator ? <AllRequests /> : <Navigate to="/" />} />
             <Route path="/approvals" element={session.can_approve ? <AllRequests pendingOnly /> : <Navigate to="/" />} />
             <Route path="/requests/:id" element={<RequestPage />} />

@@ -726,33 +726,70 @@ LAB3 = {**LAB2, "ports": [_port("leaf1", "eth1", "fabric", "spine1"), _port("lea
 patched3 = mock.patch("workflows.labmodel.model", return_value=LAB3)
 
 
+APPS = [{"id": "t1", "app_id": "APP-1001", "name": "Order Desk", "description": "", "owner": {"id": "g1", "name": "Order Desk team", "email": ""}, "label": "APP-1001 · Order Desk"}]
+PROFS = [{"name": "web-trunk", "description": "", "mode": "tagged", "access_vlan": None, "trunk_vlans": [42, 47], "native_vlan": 10}]
+LAB3["port_profiles"] = PROFS
+patched_apps = mock.patch("workflows.ownership.applications", return_value=APPS)
+
+
 @patched3
+@patched_apps
 class PortFormTests(TestCase):
     def form(self, **d):
         return F.PortForm({"reason": "r", **d})
 
-    def test_uplink_is_blocked(self, _m):
+    def test_uplink_is_blocked(self, _a, _m):
         f = self.form(port="leaf1|eth1", state="disabled"); self.assertFalse(f.is_valid()); self.assertIn("uplink to spine1", str(f.errors))
         self.assertIn("blocked", dict(F.PortForm().fields["port"].choices)["leaf1|eth1"])
 
-    def test_spare_access_and_trunk(self, _m):
-        f = self.form(port="leaf1|eth6", state="enabled", mode="access", access_vlan="47"); self.assertTrue(f.is_valid(), f.errors)
-        p = f.params(); self.assertEqual((p["enabled"], p["mode"], p["access_vlan"], p["trunk_vlans"], p["after"]), (True, "access", 47, [], "enabled, access VLAN 47"))
-        f = self.form(port="leaf1|eth6", state="enabled", mode="tagged", trunk_vlans=["47", "20"]); self.assertTrue(f.is_valid(), f.errors)
-        self.assertEqual(f.params()["trunk_vlans"], [20, 47]); self.assertEqual(f.params()["kind"], "spare")
+    def test_spare_by_hand_needs_an_owner(self, _a, _m):
+        f = self.form(port="leaf1|eth6", state="enabled", mode="access", access_vlan="47"); self.assertFalse(f.is_valid()); self.assertIn("needs an owner", str(f.errors))
+        f = self.form(port="leaf1|eth6", state="enabled", mode="access", access_vlan="47", application="APP-1001", description="backup appliance")
+        self.assertTrue(f.is_valid(), f.errors); p = f.params()
+        self.assertEqual((p["mode"], p["untagged_vlan"], p["application"]["app_id"], p["owner"]), ("access", 47, "APP-1001", "Order Desk team"))
+        self.assertEqual(p["description"], "APP-1001 Order Desk — backup appliance")
 
-    def test_spare_refusals(self, _m):
-        for d, why in [(dict(state="enabled"), "needs a mode"), (dict(state="enabled", mode="access"), "choose the access VLAN"),
-                       (dict(state="enabled", mode="tagged"), "at least one VLAN"), (dict(state="enabled", mode="access", access_vlan="47", trunk_vlans=["20"]), "one VLAN"),
-                       (dict(state="enabled", mode="access", access_vlan="110"), "valid choice")]:
+    def test_trunk_with_native(self, _a, _m):
+        f = self.form(port="leaf1|eth6", state="enabled", mode="tagged", trunk_vlans=["47", "20"], native_vlan="10", application="APP-1001"); self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual((f.params()["trunk_vlans"], f.params()["native_vlan"], f.params()["untagged_vlan"]), ([20, 47], 10, 10))
+        f = self.form(port="leaf1|eth6", state="enabled", mode="tagged", trunk_vlans=["47"], native_vlan="47", application="APP-1001"); self.assertFalse(f.is_valid())
+        self.assertIn("both tagged", str(f.errors))
+
+    def test_profile(self, _a, _m):
+        f = self.form(port="leaf1|eth6", state="enabled", profile="web-trunk", application="APP-1001"); self.assertTrue(f.is_valid(), f.errors); p = f.params()
+        self.assertEqual((p["profile"], p["mode"], p["trunk_vlans"], p["native_vlan"]), ("web-trunk", "tagged", [42, 47], 10))
+        f = self.form(port="leaf1|eth6", state="enabled", profile="web-trunk", mode="access", access_vlan="47", application="APP-1001"); self.assertFalse(f.is_valid())
+        self.assertIn("sets the mode", str(f.errors))
+
+    def test_default(self, _a, _m):
+        f = self.form(port="leaf1|eth7", state="default"); self.assertTrue(f.is_valid(), f.errors); p = f.params()
+        self.assertEqual((p["enabled"], p["mode"], p["trunk_vlans"], p["profile"], p["application"], p["description"]), (False, None, [], None, None, F.SPARE_DESC))
+        f = self.form(port="leaf1|eth6", state="default"); self.assertFalse(f.is_valid()); self.assertIn("nothing to change", str(f.errors))
+        f = self.form(port="leaf1|eth7", state="default", application="APP-1001"); self.assertFalse(f.is_valid()); self.assertIn("Default clears", str(f.errors))
+        f = self.form(port="leaf1|eth3", state="default"); self.assertFalse(f.is_valid()); self.assertIn("use Enable", str(f.errors))
+
+    def test_spare_refusals(self, _a, _m):
+        for d, why in [(dict(state="enabled", application="APP-1001"), "needs a configuration"), (dict(state="enabled", mode="access", application="APP-1001"), "choose the access VLAN"),
+                       (dict(state="enabled", mode="tagged", application="APP-1001"), "at least one VLAN"),
+                       (dict(state="enabled", mode="access", access_vlan="110", application="APP-1001"), "valid choice")]:
             f = self.form(port="leaf1|eth6", **d); self.assertFalse(f.is_valid(), d); self.assertIn(why, str(f.errors), d)
-        f = self.form(port="leaf1|eth7", state="enabled", mode="access", access_vlan="47"); self.assertFalse(f.is_valid()); self.assertIn("nothing to change", str(f.errors))
-        f = self.form(port="leaf1|eth7", state="disabled", mode="none"); self.assertTrue(f.is_valid(), f.errors)
-        self.assertEqual((f.params()["mode"], f.params()["access_vlan"], f.params()["trunk_vlans"], f.params()["after"]), (None, None, [], "disabled"))
-        f = self.form(port="leaf1|eth7", state="enabled", mode="none"); self.assertFalse(f.is_valid()); self.assertIn("disable it", str(f.errors))
 
-    def test_server_leg(self, _m):
+    def test_server_leg(self, _a, _m):
         f = self.form(port="leaf1|eth3", state="disabled"); self.assertTrue(f.is_valid(), f.errors)
         self.assertEqual((f.params()["kind"], f.params()["partner"]), ("server leg", "leaf2 eth3"))
         f = self.form(port="leaf1|eth4", state="disabled"); self.assertFalse(f.is_valid()); self.assertIn("would cut app1 off", str(f.errors))
-        f = self.form(port="leaf1|eth3", state="enabled", mode="tagged", trunk_vlans=["47"]); self.assertFalse(f.is_valid()); self.assertIn("VLAN follows the server", str(f.errors))
+        f = self.form(port="leaf1|eth3", state="enabled", mode="tagged", trunk_vlans=["47"]); self.assertFalse(f.is_valid()); self.assertIn("follow the server", str(f.errors))
+
+
+@patched3
+class PortProfileFormTests(TestCase):
+    def test_create_change_delete(self, _m):
+        f = F.PortProfileForm({"action": "create", "name": "Web-Access", "mode": "access", "access_vlan": "47", "reason": "r"}); self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual(f.params()["profile"], {"name": "web-access", "description": "", "mode": "access", "access_vlan": 47, "trunk_vlans": [], "native_vlan": None})
+        self.assertFalse(F.PortProfileForm({"action": "create", "name": "web-trunk", "mode": "access", "access_vlan": "47", "reason": "r"}).is_valid())
+        users = [dict(p, profile="web-trunk") if p["name"] == "eth7" else p for p in LAB3["ports"]]
+        with mock.patch("workflows.labmodel.model", return_value={**LAB3, "ports": users}):
+            f = F.PortProfileForm({"action": "update", "name": "web-trunk", "mode": "tagged", "trunk_vlans": ["42"], "reapply": "on", "reason": "r"}); self.assertTrue(f.is_valid(), f.errors)
+            self.assertEqual(f.params()["ports"], ["leaf1 eth7"])
+            f = F.PortProfileForm({"action": "delete", "name": "web-trunk", "reason": "r"}); self.assertFalse(f.is_valid()); self.assertIn("in use on leaf1 eth7", str(f.errors))
+        f = F.PortProfileForm({"action": "delete", "name": "web-trunk", "reason": "r"}); self.assertTrue(f.is_valid(), f.errors)

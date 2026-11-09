@@ -2,6 +2,27 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.24.0] - 2026-11-09
+
+### Added
+- Port Provisioning: **port profiles** — named presets (access: one VLAN; trunk: tagged VLANs, optionally one untagged
+  native VLAN) in Nautobot's plan (`port_profiles`); a workflow creates, changes or deletes one; a change can be
+  re-applied to every port that uses it (one request, one pipeline run); a profile in use cannot be deleted. Tools page
+  *Port Profiles* (with links that pre-fill the request form).
+- Port **owners**: applications are Nautobot tenants (tenant group e3t-applications, custom field `e3t_app_id`
+  APP-<digits>), each owned by a team (contact association, role Owner); a port belongs to one application
+  (relationship `e3t_port_application`) and carries its profile (custom field `e3t_port_profile`). Enabling a spare port
+  needs an owner; the switch shows `<APP-ID> <application> — <what is plugged in>`. Tools page *Applications* (operators
+  add / change; recorded, not enforced). `manage.py e3t_ownership_schema` creates the Nautobot schema (idempotent).
+- **Default** action: a spare port back to disabled with no VLANs, profile, owner or description.
+- Trunks may carry one untagged (native) VLAN (switches template: `native-vlan` + `allowed-vlan`).
+- Request forms can be pre-filled from the URL (known fields only).
+
+### Tested live
+- APP-1042 (Storage team); profile backup-trunk created (#41); leaf2 eth7 on it, owned by APP-1042 (#42: bridge 41, 47
+  tagged, 43 untagged; description 'APP-1042 Backup service — backup appliance'); the profile changed and re-applied
+  (#43); the port defaulted (#44: shut, no VLANs, owner and profile cleared); the profile deleted (#45).
+
 ## [0.23.0] - 2026-11-09
 
 ### Added

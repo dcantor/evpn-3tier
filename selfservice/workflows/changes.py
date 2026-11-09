@@ -19,7 +19,7 @@ import ipaddress
 import re
 
 from . import forms as F
-from . import labmodel
+from . import labmodel, ownership
 from .clients import LOCATION, Gitea, Ipam, Nautobot
 from .executors import _check, _lab, _ping_from_wan
 
@@ -395,11 +395,24 @@ def port_config(r, log):
     vg = nb.one("ipam/vlan-groups", name=LOCATION)
     vid_id = lambda v: nb.one("ipam/vlans", vid=v, vlan_group=vg["id"])["id"]                     # noqa: E731
     want = {"enabled": bool(p["enabled"]), "description": p["description"][:200]}
+    untagged = p.get("untagged_vlan", p.get("access_vlan"))
     if kind is None:
-        want.update(mode=p["mode"] or "", untagged_vlan=vid_id(p["access_vlan"]) if p["mode"] == "access" else None,
-                    tagged_vlans=[vid_id(v) for v in p["trunk_vlans"]] if p["mode"] == "tagged" else [])
+        want.update(mode=p["mode"] or "", untagged_vlan=vid_id(untagged) if untagged else None,
+                    tagged_vlans=[vid_id(v) for v in p["trunk_vlans"]] if p["mode"] == "tagged" else [],
+                    custom_fields={ownership.CF_PROFILE: p.get("profile")})
     nb.patch(f"dcim/interfaces/{itf['id']}", want)
     log(f"Nautobot: e3t-{sw} {port} — {p['after']}" + (f" ('{p['description']}')" if kind is None else ""))
+    if kind is None:                                  # the owner: relationship application -> port (one application per port)
+        rel = nb.get("extras/relationships", key=ownership.REL)["results"][0]
+        have = nb.get("extras/relationship-associations", relationship=ownership.REL, destination_id=itf["id"], limit=10)["results"]
+        app = p.get("application")
+        for a in have:
+            if not app or a["source_id"] != app["id"]: nb.delete(f"extras/relationship-associations/{a['id']}")
+        if app and not any(a["source_id"] == app["id"] for a in have):
+            nb.post("extras/relationship-associations", {"relationship": rel["id"], "source_type": "tenancy.tenant", "source_id": app["id"],
+                                                          "destination_type": "dcim.interface", "destination_id": itf["id"]})
+        log(f"Nautobot: owner {app['app_id'] + ' ' + app['name'] + (' (team ' + p['owner'] + ')' if p.get('owner') else '') if app else '— none'}"
+            + (f"; profile {p['profile']}" if p.get("profile") else ""))
     labmodel.invalidate()
     # ---- 3 the switches pipeline (verify on Nautobot's model: a disabled server leg is expected down) -----------------------------
     log.stage("switches")
@@ -412,7 +425,7 @@ def port_config(r, log):
     if kind is None:
         tier = {v["vlan"] for v in inv["evpn"]["vlans"]}
         got = {k: t for k, t in vl.items() if k in tier}
-        want_vl = ({p["access_vlan"]: "untagged"} if p["mode"] == "access" else {v: "tagged" for v in p["trunk_vlans"]} if p["mode"] == "tagged" else {})
+        want_vl = _want_vlans(p["mode"], untagged, p["trunk_vlans"])
         _check(got == want_vl, f"{sw} {port} carries {got or 'no tier VLANs'}, not {want_vl or 'none'}")
         log(f"on the leaf: {sw} {port} is {'up' if up else 'shut'} ({sl}); bridge VLANs: " +
             (", ".join(f"{k} {t}" for k, t in sorted(got.items())) or "none"))
@@ -422,3 +435,53 @@ def port_config(r, log):
     log.stage("ping")
     pings = _ping_from_wan(inv, ssh, [], log)
     return {"port": f"{sw} {port}", "after": p["after"], "switches_run": run, "ping": pings}
+
+
+def _want_vlans(mode, untagged, trunk):
+    """The bridge VLANs a port should carry: {vid: untagged|tagged}."""
+    if mode == "access": return {untagged: "untagged"}
+    if mode == "tagged": return {**{v: "tagged" for v in trunk if v != untagged}, **({untagged: "untagged"} if untagged else {})}
+    return {}
+
+
+def port_profile(r, log):
+    p = r.parameters; name, act, prof = p["name"], p["action"], p["profile"]
+    nb = Nautobot()
+    log.stage("nautobot")
+    ctx = nb.context(); data = ctx["data"]; profs = [x for x in data.get("port_profiles", []) if x["name"] != name]
+    if act != "delete": profs.append(prof)
+    profs.sort(key=lambda x: x["name"])
+    if profs != data.get("port_profiles", []):
+        data["port_profiles"] = profs; nb.patch(f"extras/config-contexts/{ctx['id']}", {"data": data})
+        log(f"Nautobot: profile {name} {'deleted' if act == 'delete' else act + 'd'} — {p['summary']}")
+    else:
+        log(f"Nautobot: profile {name} is already as asked (a retry)")
+    labmodel.invalidate()
+    log.stage("ports")
+    if act != "update" or not p["ports"]:
+        log("no port to re-apply" + ("" if act == "update" else f": a {act}"))
+        log.stage("switches"); log("not needed: no port changes"); log.stage("checks"); log("not needed")
+        return {"profile": name, "action": act}
+    vg = nb.one("ipam/vlan-groups", name=LOCATION)
+    vid_id = lambda v: nb.one("ipam/vlans", vid=v, vlan_group=vg["id"])["id"]                     # noqa: E731
+    untagged = prof["access_vlan"] if prof["mode"] == "access" else prof.get("native_vlan")
+    for sp in p["ports"]:
+        sw, port = sp.split()
+        itf = nb.one("dcim/interfaces", device_id=nb.one("dcim/devices", name=f"e3t-{sw}")["id"], name=port)
+        if (itf.get("custom_fields") or {}).get(ownership.CF_PROFILE) != name:
+            log(f"{sp}: no longer uses {name} — left as it is"); continue
+        nb.patch(f"dcim/interfaces/{itf['id']}", {"mode": prof["mode"], "untagged_vlan": vid_id(untagged) if untagged else None,
+                                                   "tagged_vlans": [vid_id(v) for v in prof["trunk_vlans"]] if prof["mode"] == "tagged" else []})
+        log(f"Nautobot: {sp} — {ownership.profile_summary(prof)} (profile {name})")
+    labmodel.invalidate()
+    log.stage("switches")
+    run = _pipeline("evpn-3tier-switches", log)
+    log.stage("checks")
+    inv, ssh = _lab(); tier = {v["vlan"] for v in inv["evpn"]["vlans"]}; want_vl = _want_vlans(prof["mode"], untagged, prof["trunk_vlans"])
+    for sp in p["ports"]:
+        sw, port = sp.split()
+        _, vl, sl = _bridge_vlans(inv, ssh, sw, port)
+        got = {k: t for k, t in vl.items() if k in tier}
+        _check(got == want_vl, f"{sp} carries {got or 'no tier VLANs'}, not {want_vl}")
+        log(f"on the leaf: {sp} carries {', '.join(f'{k} {t}' for k, t in sorted(got.items()))} ({sl})")
+    return {"profile": name, "action": act, "ports": p["ports"], "switches_run": run}

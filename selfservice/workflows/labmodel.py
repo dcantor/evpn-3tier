@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 QUERY = """{ config_contexts(name: ["evpn-3tier"]) { data }
   devices(location: ["evpn-3tier"]) { name local_config_context_data role { name } rack { name }
     interfaces { name vrf { name } ip_addresses { address } cable_peer_interface { name device { name } } cable { label }
-      enabled mode description untagged_vlan { vid } tagged_vlans { vid } } }
+      enabled mode description untagged_vlan { vid } tagged_vlans { vid } id _custom_field_data } }
   vlans(vlan_group: ["evpn-3tier"]) { vid name } }"""
 
 
@@ -47,7 +47,8 @@ def _from_nautobot():
                                "peer": strip(i["cable_peer_interface"]["device"]["name"]) if i.get("cable_peer_interface") else None,
                                "peer_port": (i.get("cable_peer_interface") or {}).get("name"), "enabled": i.get("enabled", True) is not False,
                                "mode": (i.get("mode") or "").lower() or None, "untagged_vlan": (i.get("untagged_vlan") or {}).get("vid"),
-                               "tagged_vlans": sorted(v["vid"] for v in i.get("tagged_vlans") or []), "description": i.get("description") or ""}
+                               "tagged_vlans": sorted(v["vid"] for v in i.get("tagged_vlans") or []), "description": i.get("description") or "",
+                               "id": i.get("id"), "profile": (i.get("_custom_field_data") or {}).get("e3t_port_profile")}
                               for i in ifs if re.match(r"^eth[1-9]\d*$", i["name"])]})
     ctx = {**ctx, "_vlan_names": {v["vid"]: v["name"] for v in d.get("vlans") or []}}
     return ctx, ev, nodes, "Nautobot"
@@ -84,6 +85,8 @@ def model():
     # removable VLANs: the plan's tier VLANs, unless the lab's design (lab.conf) has them, hosts sit in them, or they are
     # the last VLAN of their VRF (its L3 config on the switches would go with it)
     ports = [{"switch": n["name"], **p} for n in leaves for p in sorted(n.get("ifs") or [], key=lambda p: int(p["name"][3:]))]
+    owners = _port_applications()                       # interface id -> application (Port Provisioning: who owns the port)
+    for p in ports: p["application"] = owners.get(p.get("id"))
     on_ports = {}
     for p in ports:
         for v in ([p["untagged_vlan"]] if p["mode"] == "access" and p["untagged_vlan"] else []) + (p["tagged_vlans"] if p["mode"] == "tagged" else []):
@@ -115,10 +118,24 @@ def model():
         "hosts": [{k: n.get(k) for k in ("name", "role", "vrf", "vlan", "vlans", "address", "hostnum", "peers")}
                   for n in sorted(nodes, key=lambda n: n["idx"]) if n["role"] in ("lb", "web", "app", "db")],
         "fw_policy": ctx.get("fw_policy", []), "web_vip": ctx.get("web_vip"),
-        "ports": ports,
+        "ports": ports, "port_profiles": ctx.get("port_profiles", []),
     }
     _cache.update(t=time.time(), v=m)
     return m
+
+
+def _port_applications():
+    """{interface id: application} from Nautobot's relationship e3t_port_application (REST: the GraphQL schema learns new
+    relationships only when Nautobot restarts)."""
+    try:
+        from . import ownership
+        from .clients import Nautobot
+        nb = Nautobot()
+        apps = {a["id"]: a for a in ownership.applications()}
+        assoc = nb.get("extras/relationship-associations", relationship=ownership.REL, limit=1000)["results"]   # the filter takes the key
+        return {a["destination_id"]: apps.get(a["source_id"]) for a in assoc if a["source_id"] in apps}
+    except Exception as e:                                                    # noqa: BLE001 — ownership is a label, never a blocker
+        log.warning("port applications unknown (%s)", e); return {}
 
 
 def _base_vlans():

@@ -173,3 +173,13 @@ export const dbApi = {
   asnsXlsx: "/api/tools/asns.xlsx",
   vlansXlsx: "/api/tools/vlans.xlsx",
 };
+
+// ---- applications (port owners) and port profiles -------------------------------------------------------------------------
+export type OwnedPort = { port: string; enabled: boolean; profile: string | null; app_id: string | null; description: string };
+export type Application = { id: string; app_id: string; name: string; description: string; owner: { id: string; name: string; email: string } | null; label: string; ports: OwnedPort[] };
+export type PortProfile = { name: string; description: string; mode: "access" | "tagged"; access_vlan: number | null; trunk_vlans: number[]; native_vlan: number | null; summary: string; ports: OwnedPort[] };
+export const ownersApi = {
+  applications: () => call<{ applications: Application[]; can_edit: boolean }>("GET", "/applications"),
+  saveApplication: (b: { app_id: string; name: string; owner: string; email: string; description: string }) => call<Application>("POST", "/applications", b),
+  profiles: () => call<{ profiles: PortProfile[]; can_edit: boolean }>("GET", "/port-profiles"),
+};

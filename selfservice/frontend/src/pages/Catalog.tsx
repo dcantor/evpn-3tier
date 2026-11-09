@@ -51,6 +51,18 @@ export default function Catalog() {
           <Link to="/tools/vlans" className="btn primary">Open<Icon name="chevron" /></Link>
         </Card>
         <Card className="wf tool">
+          <span className="tool-i"><Icon name="server" size={22} /></span>
+          <h3>Applications</h3>
+          <p className="mute">The applications that own switch ports — an application ID, a name and an owner team, kept in Nautobot — with the ports each one owns. Operators add and change them.</p>
+          <Link to="/tools/applications" className="btn primary">Open<Icon name="chevron" /></Link>
+        </Card>
+        <Card className="wf tool">
+          <span className="tool-i"><Icon name="layers" size={22} /></span>
+          <h3>Port Profiles</h3>
+          <p className="mute">The named presets Port Provisioning offers — access or trunk, their VLANs — and the ports using each. Create, change (re-applied to its ports) or delete one with a request.</p>
+          <Link to="/tools/port-profiles" className="btn primary">Open<Icon name="chevron" /></Link>
+        </Card>
+        <Card className="wf tool">
           <span className="tool-i"><Icon name="term" size={22} /></span>
           <h3>View Device Configurations</h3>
           <p className="mute">The running configuration of any switch, firewall or server, fetched live and shown right here — find in it, copy it, download it as a text file, or download several devices at once as a zip. Secrets are redacted.</p>

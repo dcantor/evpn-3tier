@@ -361,3 +361,53 @@ def vlan_database_xlsx(request):
     from . import dbtools
     audit.info("%s: VLAN database, xlsx", request.user)
     return _xlsx(dbtools.vlan_xlsx(), "vlans")
+
+
+# ---- applications (owners of ports) and port profiles -----------------------------------------------------------------------------
+class AppIn(Schema):
+    app_id: str
+    name: str
+    owner: str
+    email: str = ""
+    description: str = ""
+
+
+def _ports_by(m, key):
+    out = {}
+    for p in m.get("ports", []):
+        k = key(p)
+        if k: out.setdefault(k, []).append({"port": f"{p['switch']} {p['name']}", "enabled": p["enabled"], "profile": p.get("profile"),
+                                            "app_id": (p.get("application") or {}).get("app_id"), "description": p["description"]})
+    return out
+
+
+@api.get("/applications", tags=["ports"])
+def list_applications(request):
+    """Applications (Nautobot tenants in e3t-applications) with their owner team and the switch ports they own."""
+    from . import labmodel, ownership
+    m = labmodel.model(); owned = _ports_by(m, lambda p: (p.get("application") or {}).get("app_id"))
+    return {"applications": [{**a, "ports": owned.get(a["app_id"], [])} for a in ownership.applications(force=True)],
+            "can_edit": services.is_operator(request.user)}
+
+
+@api.post("/applications", tags=["ports"])
+def save_application(request, body: AppIn):
+    """Create or change an application and its owner team (operators). Ownership is recorded in Nautobot."""
+    from . import ownership
+    if not services.is_operator(request.user): raise HttpError(403, "operators only")
+    app_id, name, owner = body.app_id.strip().upper(), body.name.strip(), body.owner.strip()
+    if not ownership.APP_ID.match(app_id): raise HttpError(400, "Application ID: APP- and 3 to 6 digits, e.g. APP-1042")
+    if not name or not owner: raise HttpError(400, "Name and owner team are required")
+    audit.info("%s: application %s %s, owner %s", request.user, app_id, name, owner)
+    try: return ownership.save_application(app_id, name[:100], owner[:100], body.description.strip()[:200], body.email.strip()[:254])
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"Nautobot: {type(e).__name__}: {e}")
+
+
+@api.get("/port-profiles", tags=["ports"])
+def list_port_profiles(request):
+    """Port profiles (the evpn-3tier plan) and the ports that use each."""
+    from . import labmodel, ownership
+    m = labmodel.model(); used = _ports_by(m, lambda p: p.get("profile"))
+    return {"profiles": [{**p, "summary": ownership.profile_summary(p), "ports": used.get(p["name"], [])} for p in m.get("port_profiles", [])],
+            "can_edit": services.is_operator(request.user)}

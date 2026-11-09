@@ -112,7 +112,12 @@ export default function NewRequest() {
     api.form(slug).then((s) => {
       setSpec(s);
       setValues(Object.fromEntries(s.fields.filter((f) => f.type !== "computed" || !f.ui?.template)
-        .map((f) => [f.name, f.initial ?? (f.type === "checkbox" ? false : f.type === "multiselect" ? [] : "")])));
+        .map((f) => {
+          // a link may pre-fill the form (?name=web-access&trunk_vlans=41,47): known fields only
+          const q = new URLSearchParams(window.location.search).get(f.name);
+          if (q !== null) return [f.name, f.type === "multiselect" ? q.split(",").filter(Boolean) : f.type === "checkbox" ? q === "true" || q === "on" : q];
+          return [f.name, f.initial ?? (f.type === "checkbox" ? false : f.type === "multiselect" ? [] : "")];
+        })));
     }).catch((e) => setLoadErr(e.message));
   }, [slug]);
 
