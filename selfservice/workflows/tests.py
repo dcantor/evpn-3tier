@@ -125,3 +125,45 @@ class RequestFlowTests(TestCase):
         self.client.force_login(self.op)
         for name, args in (("dashboard", []), ("catalog", []), ("new_request", ["add-vlan"]), ("new_request", ["lb-peering"]), ("all_requests", [])):
             self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 200, name)
+
+
+@patched
+class ApprovalTests(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user("alice", password="alice-password-1")
+        self.op = User.objects.create_user("olga", password="olga-password-1")
+        ops = Group.objects.create(name="operators")
+        ops.permissions.add(*Permission.objects.filter(codename__in=["view_all_requests", "approve_requests"])); self.op.groups.add(ops)
+        self.client.force_login(self.alice); self.client.post(reverse("new_request", args=["add-vlan"]), VLAN_OK)
+        self.wr = WorkflowRequest.objects.get()
+
+    def test_requester_cannot_approve(self, _m):
+        self.assertEqual(self.client.post(reverse("decide_request", args=[self.wr.pk, "approve"])).status_code, 403)
+
+    def test_operator_approves_and_worker_runs(self, _m):
+        self.client.force_login(self.op)
+        self.client.post(reverse("decide_request", args=[self.wr.pk, "approve"]), {"note": "ok"})
+        self.wr.refresh_from_db(); self.assertEqual((self.wr.status, self.wr.decided_by), ("approved", self.op))
+        from django.core.management import call_command
+        with mock.patch.dict("workflows.executors.EXECUTORS", {"add-vlan": lambda r, log: (log("step one"), {"x": 1})[1]}):
+            call_command("e3t_worker", once=True)
+        self.wr.refresh_from_db(); self.assertEqual(self.wr.status, "done"); self.assertEqual(self.wr.result["x"], 1)
+        self.assertEqual(list(self.wr.events.values_list("kind", flat=True)), ["submitted", "approved", "started", "step", "done"])
+
+    def test_failure_then_retry(self, _m):
+        self.client.force_login(self.op); self.client.post(reverse("decide_request", args=[self.wr.pk, "approve"]))
+        from django.core.management import call_command
+        def boom(r, log): raise RuntimeError("pipeline failed")
+        with mock.patch.dict("workflows.executors.EXECUTORS", {"add-vlan": boom}): call_command("e3t_worker", once=True)
+        self.wr.refresh_from_db(); self.assertEqual(self.wr.status, "failed"); self.assertIn("pipeline failed", self.wr.result["error"])
+        self.client.post(reverse("decide_request", args=[self.wr.pk, "retry"]))
+        self.wr.refresh_from_db(); self.assertEqual(self.wr.status, "approved")
+
+    def test_reject(self, _m):
+        self.client.force_login(self.op); self.client.post(reverse("decide_request", args=[self.wr.pk, "reject"]), {"note": "not now"})
+        self.wr.refresh_from_db(); self.assertEqual(self.wr.status, "rejected")
+        self.assertEqual(self.client.post(reverse("decide_request", args=[self.wr.pk, "approve"])).status_code, 302)   # no longer submitted
+        self.wr.refresh_from_db(); self.assertEqual(self.wr.status, "rejected")
+
+    def test_unknown_decision(self, _m):
+        self.client.force_login(self.op); self.assertEqual(self.client.post(reverse("decide_request", args=[self.wr.pk, "bless"])).status_code, 404)

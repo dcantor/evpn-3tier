@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block title %}#{{ r.pk }}{% endblock %}
-{% block content %}
+{% block content %}{% if live %}<meta http-equiv="refresh" content="5">{% endif %}
 <div class="grid">
   <div>
     <div class="card">
@@ -9,9 +9,19 @@
         <dt>Requested by</dt><dd>{{ r.requested_by.get_username }}</dd>
         <dt>Submitted</dt><dd>{{ r.created|date:"Y-m-d H:i" }}</dd>
         <dt>Why</dt><dd>{{ r.reason|linebreaksbr }}</dd>
+        {% if r.decided_by %}<dt>{% if r.status == "rejected" %}Rejected{% else %}Approved{% endif %} by</dt><dd>{{ r.decided_by.get_username }}, {{ r.decided_at|date:"Y-m-d H:i" }}</dd>{% endif %}
+        {% if r.result.switches_run_url %}<dt>Pipeline run</dt><dd><a href="{{ r.result.switches_run_url }}">evpn-3tier-switches #{{ r.result.switches_run }}</a></dd>{% endif %}
+        {% if r.result.error %}<dt>Error</dt><dd class="errorlist" style="padding:0">{{ r.result.error }}</dd>{% endif %}
       </dl>
+      {% if live %}<p class="small mute">{% if r.status == "approved" %}Queued for the worker{% else %}The worker is carrying it out{% endif %} — this page refreshes every 5 s.</p>{% endif %}
       <h2 style="margin-top:16px">Parameters</h2>
       <dl class="kv">{% for k, v in r.parameters.items %}<dt>{{ k }}</dt><dd class="mono">{% if v|stringformat:"s"|slice:":1" == "[" %}{{ v|join:", " }}{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
+      {% if can_decide %}<form method="post" class="f" style="margin-top:16px">{% csrf_token %}
+        <p><label for="note">Note (optional)</label><input type="text" name="note" id="note" maxlength="300"></p>
+        <button class="btn" formaction="{% url 'decide_request' r.pk 'approve' %}">Approve — carry it out</button>
+        <button class="btn secondary" formaction="{% url 'decide_request' r.pk 'reject' %}">Reject</button></form>{% endif %}
+      {% if can_retry %}<form method="post" action="{% url 'decide_request' r.pk 'retry' %}" style="margin-top:16px">{% csrf_token %}
+        <button class="btn">Retry (every step is safe to repeat)</button></form>{% endif %}
       {% if can_cancel %}<form method="post" action="{% url 'cancel_request' r.pk %}" style="margin-top:16px">{% csrf_token %}
         <button class="btn danger" onclick="return confirm('Cancel request #{{ r.pk }}?')">Cancel this request</button></form>{% endif %}
     </div>

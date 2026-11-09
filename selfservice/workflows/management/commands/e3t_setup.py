@@ -1,7 +1,7 @@
 """First-time setup, idempotent: the secret key and the admin account (random password) in
 ~/.config/evpn-3tier/selfservice.env (mode 600, not in git), and the groups:
   requesters  submit requests, see and cancel their own
-  operators   see every request (permission workflows.view_all_requests); later: approve and run them"""
+  operators   see every request, approve or reject them (approved ones are carried out by the worker)"""
 import secrets
 
 from django.conf import settings
@@ -24,6 +24,6 @@ class Command(BaseCommand):
         if created: u.set_password(env["ADMIN_PASSWORD"]); u.save()
         Group.objects.get_or_create(name="requesters")
         ops, _ = Group.objects.get_or_create(name="operators")
-        ops.permissions.add(Permission.objects.get(codename="view_all_requests"))
+        ops.permissions.add(Permission.objects.get(codename="view_all_requests"), Permission.objects.get(codename="approve_requests"))
         self.stdout.write(f"setup: admin user '{env['ADMIN_USER']}'{' (created)' if created else ''}, groups requesters / operators; "
                           f"secrets in {settings.ENV_FILE}")

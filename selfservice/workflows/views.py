@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from . import forms as F
@@ -15,8 +16,13 @@ def is_operator(user):
     return user.is_superuser or user.has_perm("workflows.view_all_requests")
 
 
+def can_approve(user):
+    return user.is_superuser or user.has_perm("workflows.approve_requests")
+
+
 def lab_context(request):
-    return {"is_operator": request.user.is_authenticated and is_operator(request.user)}
+    return {"is_operator": request.user.is_authenticated and is_operator(request.user),
+            "can_approve": request.user.is_authenticated and can_approve(request.user)}
 
 
 def visible(user):
@@ -30,7 +36,8 @@ def dashboard(request):
     counts = {s: visible(request.user).filter(status=s).count() for s in ("submitted", "approved", "running")}
     try: lab = labmodel.model(); lab_error = None
     except Exception as e: lab, lab_error = None, f"{type(e).__name__}: {e}"   # noqa: BLE001
-    return render(request, "workflows/dashboard.html", {"mine": mine, "catalog": CATALOG, "counts": counts, "lab": lab, "lab_error": lab_error})
+    pending = WorkflowRequest.objects.filter(status=WorkflowRequest.Status.SUBMITTED).select_related("requested_by")[:20] if can_approve(request.user) else []
+    return render(request, "workflows/dashboard.html", {"mine": mine, "catalog": CATALOG, "counts": counts, "lab": lab, "lab_error": lab_error, "pending": pending})
 
 
 @login_required
@@ -53,7 +60,30 @@ def new_request(request, slug):
 def request_detail(request, pk):
     r = get_object_or_404(visible(request.user), pk=pk)
     return render(request, "workflows/detail.html", {"r": r, "wf": BY_SLUG.get(r.workflow), "events": r.events.select_related("actor"),
-                                                     "can_cancel": r.status in WorkflowRequest.OPEN and (r.requested_by == request.user or is_operator(request.user))})
+                                                     "can_cancel": r.status in WorkflowRequest.OPEN and (r.requested_by == request.user or is_operator(request.user)),
+                                                     "can_decide": r.status == WorkflowRequest.Status.SUBMITTED and can_approve(request.user),
+                                                     "can_retry": r.status == WorkflowRequest.Status.FAILED and can_approve(request.user),
+                                                     "live": r.status in (WorkflowRequest.Status.APPROVED, WorkflowRequest.Status.RUNNING)})
+
+
+@login_required
+@require_POST
+def decide_request(request, pk, decision):
+    """An operator approves (the worker carries it out) or rejects a submitted request; or retries a failed one."""
+    if decision not in ("approve", "reject", "retry"): raise Http404("no such decision")
+    if not can_approve(request.user): raise PermissionDenied
+    r = get_object_or_404(WorkflowRequest, pk=pk)
+    note = request.POST.get("note", "").strip()
+    want = {"approve": WorkflowRequest.Status.SUBMITTED, "reject": WorkflowRequest.Status.SUBMITTED, "retry": WorkflowRequest.Status.FAILED}[decision]
+    if r.status != want:
+        messages.error(request, f"#{r.pk} is {r.get_status_display().lower()}: it cannot be {decision}d now."); return redirect(r)
+    r.status = WorkflowRequest.Status.REJECTED if decision == "reject" else WorkflowRequest.Status.APPROVED
+    r.decided_by, r.decided_at = request.user, timezone.now()
+    r.save(update_fields=["status", "decided_by", "decided_at", "updated"])
+    r.log(request.user, {"approve": "approved", "reject": "rejected", "retry": "retry"}[decision], note)
+    messages.success(request, {"approve": f"#{r.pk} approved: the worker carries it out now.", "reject": f"#{r.pk} rejected.",
+                               "retry": f"#{r.pk} queued again."}[decision])
+    return redirect(r)
 
 
 @login_required

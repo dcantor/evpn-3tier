@@ -32,6 +32,9 @@
       </dl>
       {% else %}<p class="errorlist">The lab model is not available: {{ lab_error }}</p>{% endif %}
     </div>
+    {% if can_approve %}<div class="card"><h2>Awaiting approval</h2>
+      {% for r in pending %}<p class="small"><a href="{{ r.get_absolute_url }}">#{{ r.pk }} {{ r.title }}</a><br><span class="mute">by {{ r.requested_by.get_username }}, {{ r.created|date:"Y-m-d H:i" }}</span></p>
+      {% empty %}<p class="small mute">Nothing waiting.</p>{% endfor %}</div>{% endif %}
     {% if is_operator %}<div class="card"><h2>Open requests (everyone)</h2>
       <p class="small">{{ counts.submitted }} submitted · {{ counts.approved }} approved · {{ counts.running }} running — <a href="{% url 'all_requests' %}">all requests</a></p></div>{% endif %}
   </div>

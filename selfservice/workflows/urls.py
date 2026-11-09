@@ -10,4 +10,5 @@ urlpatterns = [
     path("requests/", views.all_requests, name="all_requests"),
     path("requests/<int:pk>/", views.request_detail, name="request_detail"),
     path("requests/<int:pk>/cancel/", views.cancel_request, name="cancel_request"),
+    path("requests/<int:pk>/<str:decision>/", views.decide_request, name="decide_request"),
 ]

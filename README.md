@@ -94,20 +94,35 @@ report against lab.conf (VyOS repos) -> check mode with diff -> apply -> `lab.sh
 
 ## Self-service: request workflows (Django, `selfservice/`)
 
-Since 0.8.0: **http://192.168.50.231:8120/** — a Django 6.1 app (user unit `evpn-3tier-selfservice`, gunicorn,
-`./lab.sh selfservice`; SQLite in selfservice/data/) where users **request workflows on the lab**. For now it records and
-validates requests; carrying them out (Nautobot, the Gitea pipelines, phpIPAM) comes next.
+**http://192.168.50.231:8120/** — a Django 6.1 app where users **request workflows on the lab**; an operator approves,
+and a worker carries them out through the lab's own systems (user units `evpn-3tier-selfservice` — gunicorn,
+`./lab.sh selfservice` — and `evpn-3tier-selfservice-worker`; SQLite in selfservice/data/).
 
-- **Catalog** (selfservice/workflows/catalog.py + forms.py): *Add a VLAN to the fabric* (VLAN ID, name, VRF, gateway
-  prefix, leaves or leaves + borders) and *Set up a load balancer to peer with the fabric* (name, switch pair, VRF, ASN,
-  peering VLAN and subnet, VIP prefixes, BFD). Each form is checked against the live lab (`lab.sh inventory`): VLAN IDs
-  and VNIs free, subnets inside 172.16.0.0/16 and overlapping nothing, private ASNs the lab does not use.
-- **Requests** keep their parameters, the requester, a status (submitted / cancelled now; approved / running / done /
-  failed / rejected are there for execution) and a history of events.
-- **Users** are Django accounts: group *requesters* (submit, see and cancel their own), group *operators* (see every
-  request). Accounts are made in Django admin (/admin/). The admin account and the secret key are in
-  `~/.config/evpn-3tier/selfservice.env` (mode 600), made by `manage.py e3t_setup` (selfservice/setup.sh runs it).
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (20).
+```
+requester: submit  ->  operator: approve / reject  ->  worker: Nautobot -> Gitea pipeline -> phpIPAM -> check the devices  ->  done / failed (retry)
+```
+
+- **Catalog** (selfservice/workflows/catalog.py, forms.py): *Add a VLAN to the fabric* (VLAN ID, name, VRF, gateway prefix,
+  leaves or leaves + borders) — **automated**; *Set up a load balancer to peer with the fabric* (name, switch pair, VRF,
+  ASN, peering VLAN and subnet, VIP prefixes, BFD) — requests and approval work; execution is not automated yet (no BGP
+  peering towards hosts in the switch templates, no load balancer device). Forms are checked against **Nautobot** (the
+  source of truth; lab.conf if Nautobot does not answer): VLAN IDs and VNIs free, subnets inside 172.16.0.0/16 and
+  overlapping nothing, private ASNs unused — so what the app added counts as used for the next request.
+- **Add a VLAN, executed** (workflows/executors.py, every step idempotent): 1 Nautobot — the VLAN in the evpn-3tier plan
+  (config context), the native VLAN and its prefix in the VRF; 2 Gitea — the evpn-3tier-switches pipeline (inventory,
+  check, apply, verify), waited for, its run linked; 3 phpIPAM — VLAN, subnet, gateway reservation; 4 the devices — every
+  switch in the span carries VLAN -> VNI and the anycast gateway. Proven: request #2, VLAN 40 (app-backup, VRF app,
+  172.16.40.1/24) on leaf1-4.
+- **Statuses**: submitted -> approved -> running -> done / failed (an operator can retry: steps are idempotent), or
+  rejected / cancelled. A request running when the worker restarts is marked failed. Every step is in its history.
+- **Users** are Django accounts: *requesters* submit and see / cancel their own; *operators* see every request and approve,
+  reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
+- **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
+  ~/.config/evpn-3tier/phpipam.env); none in git.
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (25).
+
+Note: a VLAN added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift
+report shows it, and `lab.sh configure` (lab.conf) would not remove it (additive).
 
 ## External IPAM: phpIPAM (node `ipam`)
 

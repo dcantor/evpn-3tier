@@ -2,6 +2,20 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] - 2026-11-08
+
+### Added
+- Self-service execution with approval: operators approve / reject / retry; a worker (user unit
+  evpn-3tier-selfservice-worker, `manage.py e3t_worker`) carries approved requests out. *Add a VLAN* is automated:
+  Nautobot (plan, native VLAN, prefix) -> evpn-3tier-switches pipeline (waited for, linked) -> phpIPAM -> a check on the
+  devices. Proven with request #2: VLAN 40 (app-backup, VRF app, 172.16.40.1/24) on leaf1-4, switches run #5.
+  *Load balancer peering*: approval works, execution not automated yet.
+- The request forms validate against Nautobot (lab.conf as fallback). 25 tests.
+
+### Fixed (found carrying out request #2)
+- The worker needs paramiko (the device check); the device check ignores VyOS's quoting of values (`vni '10040'`); the
+  worker's method is not called `execute` (that is BaseCommand's).
+
 ## [0.8.0] - 2026-11-08
 
 ### Added

@@ -1,0 +1,12 @@
+[Unit]
+Description=evpn-3tier - self-service worker: carries out approved workflow requests (Nautobot, Gitea pipelines, phpIPAM)
+After=network-online.target evpn-3tier-selfservice.service
+
+[Service]
+WorkingDirectory=/home/dcantor/evpn-3tier/selfservice
+ExecStart=/home/dcantor/evpn-3tier/selfservice/.venv/bin/python -u manage.py e3t_worker
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
