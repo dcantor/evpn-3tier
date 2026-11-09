@@ -685,3 +685,31 @@ class TwinRuleTests(TestCase):
         self.assertEqual(_twins(done, "app1", "172.16.20.11", "172.16.1.11"), [])      # a retry adds no second twin
         back = pol + [{**tw[0][1], "rule": 500}]                                         # moving back: the subnet rule covers it again
         self.assertEqual(_twins(back, "app1", "172.16.1.11", "172.16.20.11"), [])
+
+
+class DatabaseToolTests(TestCase):
+    """The ASN and VLAN databases: Excel workbooks with the right sheets, and the API behind a login."""
+
+    def test_workbooks(self):
+        import io
+        from openpyxl import load_workbook
+        from . import dbtools
+        asn = {"rows": [{"asn": 65100, "kind": "Fabric", "private": True, "devices": ["spine1", "spine2"], "roles": ["Spine"], "racks": ["spine"],
+                         "router_ids": ["10.61.0.1"], "peers": [65101], "peer_devices": ["leaf1"], "sessions": 2, "vrfs": ["default"], "source": "Nautobot"}],
+               "sessions": [{"a": "spine1", "a_asn": 65100, "a_addr": "eth1", "b": "leaf1", "b_asn": 65101, "b_addr": "eth1", "vrf": "default",
+                             "kind": "Underlay + EVPN", "bfd": True, "note": ""}],
+               "fetched": "2026-11-09T00:00:00Z", "summary": {"asns": 1, "speakers": 1, "sessions": 1, "private_used": 1, "private_pool": 1023}}
+        vl = {"rows": [{"vlan": 10, "name": "vlan_10_web", "type": "Tier", "vrf": "web", "vni": 10010, "subnet": "172.16.10.0/24", "gateway": "172.16.10.1",
+                        "size": 254, "where": "every leaf", "hosts": ["web1"], "tenant": "e3t-web", "status": "Active", "origin": "lab design",
+                        "request": None, "description": "", "in_nautobot": True}],
+              "fetched": "2026-11-09T00:00:00Z", "summary": {"vlans": 1, "by_type": {"Tier": 1}, "vrfs": 4, "subnets": 1, "self_service": 0}}
+        with mock.patch.object(dbtools, "asn_db", return_value=asn), mock.patch.object(dbtools, "vlan_db", return_value=vl):
+            a = load_workbook(io.BytesIO(dbtools.asn_xlsx())); v = load_workbook(io.BytesIO(dbtools.vlan_xlsx()))
+        self.assertEqual(a.sheetnames, ["ASNs", "BGP sessions", "About"]); self.assertEqual(v.sheetnames, ["VLANs", "About"])
+        self.assertEqual([c.value for c in a["ASNs"][2]][:4], [65100, "Fabric", "yes", "spine1, spine2"])
+        self.assertEqual([c.value for c in v["VLANs"][2]][:6], [10, "vlan_10_web", "Tier", "web", 10010, "172.16.10.0/24"])
+        self.assertEqual(a["ASNs"].freeze_panes, "A2")
+
+    def test_api_requires_login(self):
+        for u in ("/api/tools/asns", "/api/tools/asns.xlsx", "/api/tools/vlans", "/api/tools/vlans.xlsx"):
+            self.assertEqual(self.client.get(u).status_code, 401, u)

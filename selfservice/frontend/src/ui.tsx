@@ -24,6 +24,8 @@ const PATHS: Record<string, string> = {
   chart: "M3 3v18h18M7 15l4-4 3 3 5-6",
   layers: "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
   gauge: "M12 14l4-4M3.3 19a10 10 0 1 1 17.4 0z",
+  sheet: "M4 3h16v18H4zM4 9h16M4 15h16M10 3v18",
+  download: "M12 3v12M7 10l5 5 5-5M5 21h14",
   search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3",
 };
 export function Icon({ name, size = 16, className = "" }: { name: keyof typeof PATHS | string; size?: number; className?: string }) {

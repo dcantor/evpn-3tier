@@ -39,6 +39,18 @@ export default function Catalog() {
           <Link to="/tools/fabric" className="btn primary">Open<Icon name="chevron" /></Link>
         </Card>
         <Card className="wf tool">
+          <span className="tool-i"><Icon name="network" size={22} /></span>
+          <h3>ASN Database</h3>
+          <p className="mute">Every BGP AS on the fabric — switches, firewalls, the WAN, the load balancers — with its devices, router IDs, peers and VRFs, plus every BGP session of the design. Download it as an Excel spreadsheet.</p>
+          <Link to="/tools/asns" className="btn primary">Open<Icon name="chevron" /></Link>
+        </Card>
+        <Card className="wf tool">
+          <span className="tool-i"><Icon name="sheet" size={22} /></span>
+          <h3>VLAN Database</h3>
+          <p className="mute">Every VLAN — tier, firewall transit, load balancer peering, L3VNI — with its ID, name, VRF, VNI, subnet, gateway, where it lives, its hosts and the request that made it. Download it as an Excel spreadsheet.</p>
+          <Link to="/tools/vlans" className="btn primary">Open<Icon name="chevron" /></Link>
+        </Card>
+        <Card className="wf tool">
           <span className="tool-i"><Icon name="term" size={22} /></span>
           <h3>View Device Configurations</h3>
           <p className="mute">The running configuration of any switch, firewall or server, fetched live and shown right here — find in it, copy it, download it as a text file, or download several devices at once as a zip. Secrets are redacted.</p>

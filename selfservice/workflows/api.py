@@ -317,3 +317,47 @@ def fabric_reconcile(request, refresh: bool = False):
     try: return reconcile.report(refresh)
     except Exception as e:                                                    # noqa: BLE001
         raise HttpError(502, f"{type(e).__name__}: {e}")
+
+
+# ---- databases: ASNs and VLANs (read-only, no approval), as JSON and as Excel ---------------------------------------------------
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _xlsx(data, name):
+    r = HttpResponse(data, content_type=XLSX)
+    r["Content-Disposition"] = f'attachment; filename="evpn-3tier-{name}-{time.strftime("%Y%m%d-%H%M%S")}.xlsx"'
+    return r
+
+
+@api.get("/tools/asns", tags=["tools"])
+def asn_database(request):
+    """Every ASN of the fabric with its devices, roles, router IDs and peers, and every BGP session of the design (Nautobot)."""
+    from . import dbtools
+    try: return dbtools.asn_db()
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"Nautobot: {type(e).__name__}: {e}")
+
+
+@api.get("/tools/asns.xlsx", tags=["tools"])
+def asn_database_xlsx(request):
+    """The ASN database as an Excel workbook: ASNs, BGP sessions, About."""
+    from . import dbtools
+    audit.info("%s: ASN database, xlsx", request.user)
+    return _xlsx(dbtools.asn_xlsx(), "asns")
+
+
+@api.get("/tools/vlans", tags=["tools"])
+def vlan_database(request):
+    """Every VLAN of the evpn-3tier VLAN group: tier, firewall transit, load balancer peering, L3VNI (Nautobot)."""
+    from . import dbtools
+    try: return dbtools.vlan_db()
+    except Exception as e:                                                    # noqa: BLE001
+        raise HttpError(502, f"Nautobot: {type(e).__name__}: {e}")
+
+
+@api.get("/tools/vlans.xlsx", tags=["tools"])
+def vlan_database_xlsx(request):
+    """The VLAN database as an Excel workbook: VLANs, About."""
+    from . import dbtools
+    audit.info("%s: VLAN database, xlsx", request.user)
+    return _xlsx(dbtools.vlan_xlsx(), "vlans")

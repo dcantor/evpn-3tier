@@ -384,6 +384,14 @@ a.btn[aria-disabled="true"] { opacity: .55; cursor: default; }
 .table td.num { text-align: right; }
 .health-wrap { margin-top: 14px; }
 .fab-last { margin: 12px 0 0; }
+.db-bar .search { min-width: 240px; }
+.db-table td { vertical-align: top; }
+.db-table .tag { margin-bottom: 2px; }
+.pill.k-Fabric, .pill.t-Tier { background: var(--accent-soft); color: var(--accent); }
+.pill.k-Firewall, .pill.t-Firewalltransit { background: var(--bad-soft); color: var(--bad); }
+.pill.k-Loadbalancer, .pill.t-LBpeering { background: var(--warn-soft); color: var(--warn); }
+.pill.k-WAN, .pill.t-L3VNI { background: var(--run-soft); color: var(--run); }
+.pill.k-Routetarget, .pill.t-Notintheplan { background: var(--panel-2); color: var(--mute); }
 .rec-grid { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 2fr); gap: 18px; margin-top: 14px; align-items: start; }
 .rec-grid .empty { padding: 24px; }
 .rec-note { margin: 12px 0 0; }

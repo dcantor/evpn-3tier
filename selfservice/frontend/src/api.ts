@@ -155,3 +155,21 @@ export const fabricApi = {
   design: (refresh = false) => call<Fabric>("GET", `/fabric${refresh ? "?refresh=true" : ""}`),
   health: (refresh = false) => call<FabricHealth>("GET", `/fabric/health${refresh ? "?refresh=true" : ""}`),
 };
+
+// ---- databases (Tools) ---------------------------------------------------------------------------------------------------
+export type AsnRow = { asn: number; kind: string; private: boolean; devices: string[]; roles: string[]; racks: string[]; router_ids: string[];
+  peers: number[]; peer_devices: string[]; sessions: number; vrfs: string[]; source: string };
+export type BgpSession = { a: string; a_asn: number | null; a_addr: string; b: string; b_asn: number | null; b_addr: string; vrf: string; kind: string; bfd: boolean; note: string };
+export type AsnDb = { rows: AsnRow[]; sessions: BgpSession[]; fetched: string; source: string;
+  summary: { asns: number; speakers: number; sessions: number; private_used: number; private_pool: number } };
+export type VlanRow = { vlan: number; name: string | null; type: string; vrf: string | null; vni: number | null; subnet: string | null; gateway: string | null;
+  size: number | null; where: string; hosts: string[]; tenant: string | null; status: string | null; origin: string; request: number | null; description: string; in_nautobot: boolean };
+export type VlanDb = { rows: VlanRow[]; fetched: string; source: string;
+  summary: { vlans: number; by_type: Record<string, number>; vrfs: number; subnets: number; self_service: number } };
+
+export const dbApi = {
+  asns: () => call<AsnDb>("GET", "/tools/asns"),
+  vlans: () => call<VlanDb>("GET", "/tools/vlans"),
+  asnsXlsx: "/api/tools/asns.xlsx",
+  vlansXlsx: "/api/tools/vlans.xlsx",
+};

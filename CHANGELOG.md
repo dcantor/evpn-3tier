@@ -2,6 +2,17 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.22.0] - 2026-11-09
+
+### Added
+- Fabric Factory Tools: **ASN Database** (`/tools/asns`; `GET /api/tools/asns`, `/api/tools/asns.xlsx`) — every ASN of
+  the fabric (switches, firewalls, WAN, load balancers, and the route-target AS) with its devices, roles, racks, router
+  IDs, peer ASNs and VRFs, plus every BGP session of the design (underlay + EVPN, firewall transit per VRF, WAN, load
+  balancer peerings); and **VLAN Database** (`/tools/vlans`; `GET /api/tools/vlans`, `/api/tools/vlans.xlsx`) — every
+  VLAN of the evpn-3tier group (tier, firewall transit, LB peering, L3VNI) with name, VRF, VNI, subnet, gateway, size,
+  where it lives, hosts / members and the request that made it. Read-only, from Nautobot's model; searchable, filterable;
+  downloadable as Excel (openpyxl: frozen header, filters, an About sheet). First run: 12 ASNs, 34 BGP sessions, 20 VLANs.
+
 ## [0.21.0] - 2026-11-09
 
 ### Added
