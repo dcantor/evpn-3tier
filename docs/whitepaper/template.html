@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fabric Factory and the evpn-3tier Lab — White Paper</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm;
+    @bottom-left { content: "Fabric Factory and the evpn-3tier Lab"; font: 8pt Inter, Ubuntu, sans-serif; color: #8a94a6; }
+    @bottom-right { content: counter(page); font: 8pt Inter, Ubuntu, sans-serif; color: #8a94a6; } }
+  @page :first { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font: 9.6pt/1.5 Inter, Ubuntu, "Noto Sans", "DejaVu Sans", sans-serif; color: #1f2937; }
+  .cover { height: 297mm; padding: 34mm 22mm 24mm; display: flex; flex-direction: column; break-after: page;
+    background: linear-gradient(160deg, #eef0ff 0%, #ffffff 55%); }
+  .cover .brand { display: flex; align-items: center; gap: 18px; }
+  .cover .brand b { font-size: 15pt; letter-spacing: .02em; color: #4f46e5; }
+  .cover h1 { font-size: 30pt; line-height: 1.12; margin: 26mm 0 6mm; letter-spacing: -0.01em; }
+  .cover .sub { font-size: 13pt; color: #4b5563; max-width: 150mm; }
+  .cover .meta { margin-top: auto; font-size: 9.5pt; color: #5b6474; border-top: 1px solid #d6dbe4; padding-top: 6mm; display: grid; grid-template-columns: 38mm 1fr; row-gap: 2mm; }
+  .cover .meta span:nth-child(odd) { color: #8a94a6; text-transform: uppercase; font-size: 8pt; letter-spacing: .06em; padding-top: 1pt; }
+  .toc { break-after: page; }
+  .toc ol { padding-left: 5mm; columns: 1; font-size: 10.5pt; line-height: 1.9; }
+  h2 { font-size: 16pt; margin: 0 0 3mm; padding-top: 1mm; color: #111827; break-after: avoid; }
+  h2 .n { color: #4f46e5; margin-right: 3mm; }
+  section { break-before: page; }
+  section.cont { break-before: auto; margin-top: 8mm; }
+  h3 { font-size: 11.5pt; margin: 6mm 0 2mm; color: #111827; break-after: avoid; }
+  p { margin: 0 0 2.6mm; } ul, ol { margin: 0 0 3mm; padding-left: 5mm; } li { margin-bottom: 1mm; }
+  .lead { font-size: 11pt; color: #374151; margin-bottom: 4mm; }
+  figure { margin: 4mm 0 5mm; break-inside: avoid; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { font-size: 8.5pt; color: #5b6474; margin-top: 2mm; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 8.6pt; break-inside: auto; }
+  th { text-align: left; background: #f1f3f8; color: #374151; font-weight: 650; padding: 2mm 2.4mm; border-bottom: 1px solid #cdd3de; }
+  td { padding: 1.7mm 2.4mm; border-bottom: 1px solid #e5e8ef; vertical-align: top; }
+  tr { break-inside: avoid; }
+  td code, p code, li code { font: 8.4pt "DejaVu Sans Mono", monospace; background: #f1f3f8; padding: 0 2px; border-radius: 2px; }
+  pre { background: #0f1320; color: #d6dbe8; padding: 3mm 3.5mm; border-radius: 2mm; font: 7.6pt/1.5 "DejaVu Sans Mono", monospace; white-space: pre-wrap; word-break: break-word; break-inside: avoid; margin: 2mm 0 4mm; }
+  .callout { border-left: 3px solid #4f46e5; background: #f5f6ff; padding: 2.5mm 4mm; margin: 3mm 0 4mm; break-inside: avoid; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; margin: 4mm 0 5mm; }
+  .kpi { border: 1px solid #d6dbe4; border-radius: 2mm; padding: 3mm; }
+  .kpi b { display: block; font-size: 17pt; color: #4f46e5; line-height: 1.1; }
+  .kpi span { font-size: 8.2pt; color: #5b6474; }
+  .small { font-size: 8.4pt; color: #5b6474; }
+</style>
+</head>
+<body>
+<div class="cover">
+  <div class="brand">{{LOGO}}<b>FABRIC FACTORY</b></div>
+  <h1>Fabric Factory and the evpn-3tier Lab</h1>
+  <div class="sub">A self-service, intent-driven EVPN/VXLAN data centre: architecture, tech stack, and the automation and orchestration that take a request from a web form to a verified change on 20 virtual devices.</div>
+  <div class="meta">
+    <span>Document</span><span>Technical white paper</span>
+    <span>Lab version</span><span>evpn-3tier 0.18.0</span>
+    <span>Date</span><span>9 November 2026</span>
+    <span>Scope</span><span>Network design, platform, application, sources of truth, CI/CD pipelines, the self-service app, resilience and operations</span>
+  </div>
+</div>
+{{BODY}}
+</body>
+</html>
