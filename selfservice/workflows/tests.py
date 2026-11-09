@@ -298,3 +298,70 @@ class ApiTests(TestCase):
         from django.test import Client
         self.assertEqual(Client().get("/api/stream").status_code, 403)
         self.assertEqual(Client().get("/api/requests").status_code, 401)
+
+
+# ---- add-vlan: phpIPAM first (0.14.0) ---------------------------------------------------------------------------------------
+class FakeIpam:
+    """Just enough of phpIPAM's API for the reservation step."""
+    def __init__(self, vlans=None, subnets=None, free=("172.16.1.0/24",)):
+        self.vlans = vlans or {}; self.subnets = subnets or {}; self.addrs = {}; self.free = list(free); self.writes = []
+
+    def req(self, method, path, json=None):
+        path = path.strip("/")
+        if method == "POST":
+            self.writes.append(path)
+            if path == "vlan": self.vlans[json["number"]] = {"vlanId": 900 + json["number"], "number": str(json["number"]), "name": json["name"], "description": json["description"]}
+            elif path == "subnets": self.subnets[f"{json['subnet']}/{json['mask']}"] = {"id": 77, "subnet": json["subnet"], "mask": str(json["mask"]), "sectionId": "1", "description": json["description"]}
+            elif path == "addresses": self.addrs.setdefault(json["subnetId"], []).append({"ip": json["ip"]})
+            return {}
+        if path == "l2domains": return [{"id": "5", "name": "evpn-3tier"}]
+        if path == "l2domains/5/vlans": return list(self.vlans.values())
+        if path == "sections": return [{"id": "1", "name": "evpn-3tier"}]
+        if path == "vrf": return [{"vrfId": "3", "name": "app"}]
+        if path == "subnets/cidr/172.16.0.0/16": return [{"id": 17, "sectionId": "1"}]
+        if path.startswith("subnets/cidr/"):
+            k = path.removeprefix("subnets/cidr/"); return [self.subnets[k]] if k in self.subnets else None
+        if path.endswith("/addresses"): return self.addrs.get(int(path.split("/")[1]), [])
+        raise AssertionError(path)
+
+
+class AddVlanOrderTests(TestCase):
+    def setUp(self):
+        u = User.objects.create_user("o", password="o-password-123")
+        self.r = WorkflowRequest.objects.create(workflow="add-vlan", title="t", requested_by=u, status="running",
+                                                parameters={"vlan_id": 42, "vrf": "app", "vni": 10042, "gateway": "172.16.1.1/24", "span": "leaves",
+                                                            "name": "vlan_42_app", "subnet": "172.16.1.0/24"})
+
+    def run_until_nautobot(self, ipam):
+        """Run add_vlan with this phpIPAM; stop it where Nautobot would be called (and record the order)."""
+        import ipaddress as I
+        from . import executors
+        from .progress import NullProgress
+        order = []
+        class Stop(Exception): pass
+        def nautobot(*a, **k): order.append("nautobot"); raise Stop()
+        log = NullProgress(out=lambda m: order.append("log: " + m)); log.stage = lambda k: order.append(k)
+        with mock.patch.object(executors, "Ipam", return_value=ipam), mock.patch.object(executors, "Nautobot", side_effect=nautobot), \
+             mock.patch.object(executors.allocate, "free_subnets", return_value=[I.ip_network(x) for x in ipam.free]):
+            try: executors.add_vlan(self.r, log)
+            except Stop: pass
+        return order
+
+    def test_phpipam_first_then_nautobot(self):
+        ipam = FakeIpam(); order = self.run_until_nautobot(ipam)
+        self.assertEqual([o for o in order if not o.startswith("log")][:2], ["phpipam", "nautobot"])
+        self.assertEqual(ipam.writes, ["vlan", "subnets", "addresses"])
+        self.assertIn("request #", ipam.subnets["172.16.1.0/24"]["description"])
+
+    def test_taken_since_submitted_changes_nothing(self):
+        ipam = FakeIpam(vlans={42: {"vlanId": 1, "number": "42", "name": "someone", "description": "manual"}})
+        with self.assertRaisesRegex(RuntimeError, "VLAN 42 was taken"): self.run_until_nautobot(ipam)
+        self.assertEqual(ipam.writes, [])
+        ipam = FakeIpam(free=())       # the /24 overlaps something reserved since
+        with self.assertRaisesRegex(RuntimeError, "no longer free"): self.run_until_nautobot(ipam)
+        self.assertEqual(ipam.writes, [])                                             # not even the VLAN
+
+    def test_retry_accepts_its_own_reservation(self):
+        ipam = FakeIpam(); self.run_until_nautobot(ipam); n = len(ipam.writes)
+        order = self.run_until_nautobot(ipam)
+        self.assertIn("nautobot", order); self.assertEqual(len(ipam.writes), n)      # nothing written twice

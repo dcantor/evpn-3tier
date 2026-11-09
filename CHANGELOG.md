@@ -2,6 +2,14 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.14.0] - 2026-11-09
+
+### Changed
+- *Add a VLAN* runs phpIPAM first — the source of truth for addressing: 1 reserve the VLAN, subnet and gateway in
+  phpIPAM (all checks before the first write: taken since submission = refused, nothing changed), 2 Nautobot from
+  phpIPAM's reservation (read back), 3 the switches pipeline, 4 the checks. Stages in the front end follow. Proven with
+  request #9 (VLAN 44, 172.16.3.0/24). 38 tests.
+
 ## [0.13.0] - 2026-11-09
 
 ### Added

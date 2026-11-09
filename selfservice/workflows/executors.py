@@ -1,12 +1,13 @@
 """Carrying out approved requests. The worker (manage.py e3t_worker) calls run(request, log); each step logs to the
 request's history and is idempotent, so a failed request can be retried from the top.
 
-add-vlan
-  1 Nautobot   the VLAN in the evpn-3tier plan (config context: VLAN, VRF, VNI, gateway, span) — what the pipelines
-               render from — plus the native VLAN (group evpn-3tier) and its prefix (namespace evpn-3tier, in the VRF)
-  2 Gitea      the evpn-3tier-switches pipeline: inventory from Nautobot, check, apply to the leaves / borders, verify
-  3 phpIPAM    the VLAN (domain evpn-3tier), the subnet (under 172.16.0.0/16, its VRF and VLAN), the gateway reservation
-  4 devices    every switch in the span carries the VLAN (vlan-to-vni) and its anycast gateway; both borders permit the
+add-vlan       (phpIPAM is the source of truth for addressing: it is written first)
+  1 phpIPAM    reserve the VLAN (domain evpn-3tier), the subnet (under 172.16.0.0/16, its VRF and VLAN) and the gateway
+               (its first host) — refused, with nothing changed, if any of it was taken since the request was submitted
+  2 Nautobot   from phpIPAM's reservation (read back): the VLAN in the evpn-3tier plan (config context: VLAN, VRF, VNI,
+               gateway, span) — what the pipelines render from — plus the native VLAN and its prefix (in the VRF)
+  3 Gitea      the evpn-3tier-switches pipeline: inventory from Nautobot, check, apply to the leaves / borders, verify
+  4 checks     every switch in the span carries the VLAN (vlan-to-vni) and its anycast gateway; both borders permit the
                subnet to the WAN (prefix-list FABRIC-SUBNETS, called by route-map TO-WAN on the eBGP sessions to the WAN)
 lb-peering
   1 Nautobot   the peering in the plan (config context lb_peerings), its VLAN and prefixes (peering subnet, VIPs)
@@ -21,7 +22,7 @@ import sys
 
 from django.conf import settings
 
-from . import labmodel
+from . import allocate, labmodel
 from .clients import LOCATION, Gitea, Ipam, Nautobot
 
 
@@ -36,8 +37,42 @@ def _check(cond, msg):
 def add_vlan(r, log):
     p = r.parameters; vid, vrf, vni, gw, span = p["vlan_id"], p["vrf"], p["vni"], p["gateway"], p["span"]
     net = ipaddress.ip_interface(gw).network
+    # ---- 1 phpIPAM — the source of truth for addressing: reserve first --------------------------------------------------------
+    log.stage("phpipam")
+    ip = Ipam(); tag = f"request #{r.pk}"
+    dom = next(d for d in ip.req("GET", "l2domains") if d["name"] == LOCATION)
+    have = {int(x["number"]): x for x in ip.req("GET", f"l2domains/{dom['id']}/vlans") or []}
+    sec = next(s for s in ip.req("GET", "sections") if s["name"] == LOCATION)
+    vrf_id = next(x["vrfId"] for x in ip.req("GET", "vrf") if x["name"] == vrf)
+    master = next(x for x in ip.req("GET", "subnets/cidr/172.16.0.0/16") if x["sectionId"] == sec["id"])
+    sub = next((x for x in ip.req("GET", f"subnets/cidr/{net.network_address}/{net.prefixlen}") or [] if x["sectionId"] == sec["id"]), None)
+    # every check before the first write: refused means nothing changed in phpIPAM
+    if vid in have:     # already there: ours (a retry) or taken since the request was submitted
+        _check(tag in (have[vid].get("description") or ""), f"phpIPAM: VLAN {vid} was taken since the request was submitted ({have[vid].get('name')}) — nothing changed; submit a new request")
+    if sub is not None:
+        _check(tag in (sub.get("description") or ""), f"phpIPAM: {net} was taken since the request was submitted — nothing changed; submit a new request")
+    else:
+        _check(str(net) in {str(n) for n in allocate.free_subnets(net.prefixlen)},
+               f"phpIPAM: {net} is no longer free (it overlaps a subnet reserved since the request was submitted) — nothing changed; submit a new request")
+    # reserve
+    if vid not in have:
+        ip.req("POST", "vlan", json={"domainId": dom["id"], "number": vid, "name": p["name"], "description": f"tier VLAN, L2VNI {vni}, VRF {vrf} ({tag})"})
+    vlan_id = {int(x["number"]): x for x in ip.req("GET", f"l2domains/{dom['id']}/vlans")}[vid]["vlanId"]
+    if sub is None:
+        ip.req("POST", "subnets", json={"subnet": str(net.network_address), "mask": net.prefixlen, "sectionId": sec["id"], "masterSubnetId": master["id"],
+                                        "vrfId": vrf_id, "vlanId": vlan_id, "description": f"VLAN {vid} — {vrf} tier (L2VNI {vni}), gateway {ipaddress.ip_interface(gw).ip} (anycast); {tag}"})
+        sub = next(x for x in ip.req("GET", f"subnets/cidr/{net.network_address}/{net.prefixlen}") if x["sectionId"] == sec["id"])
+    gw_ip = str(ipaddress.ip_interface(gw).ip)
+    if not any(a["ip"] == gw_ip for a in ip.req("GET", f"subnets/{sub['id']}/addresses") or []):
+        ip.req("POST", "addresses", json={"subnetId": sub["id"], "ip": gw_ip, "hostname": f"gw-{p['name']}", "is_gateway": 1,
+                                          "description": f"anycast gateway, every leaf{' + border' if 'borders' in span else ''}"[:64]})
+    # what Nautobot gets is what phpIPAM holds: read it back
+    net = ipaddress.ip_network(f"{sub['subnet']}/{sub['mask']}")
+    gw_ip = next(a["ip"] for a in ip.req("GET", f"subnets/{sub['id']}/addresses") if a["ip"] == str(net.network_address + 1))
+    gw = f"{gw_ip}/{net.prefixlen}"
+    log(f"phpIPAM: reserved VLAN {vid} ({p['name']}), subnet {net} in VRF {vrf} and the gateway {gw_ip} (the subnet's first host)")
     nb = Nautobot()
-    # ---- 1 Nautobot -------------------------------------------------------------------------------------------------------
+    # ---- 2 Nautobot — from phpIPAM's reservation ----------------------------------------------------------------------------
     log.stage("nautobot")
     ctx = nb.context(); data = ctx["data"]; vlans = data["evpn"]["vlans"]
     entry = {"vlan": vid, "vrf": vrf, "vni": vni, "gateway": gw, "on": span.split("+")}
@@ -67,32 +102,11 @@ def add_vlan(r, log):
         nb.post("ipam/vrf-prefix-assignments", {"vrf": vrf_obj["id"], "prefix": pf["id"]})
         log(f"Nautobot: prefix {net} in namespace {LOCATION}, VRF {vrf}")
     labmodel.invalidate()
-    # ---- 2 the switches pipeline ---------------------------------------------------------------------------------------------
+    # ---- 3 the switches pipeline (renders from Nautobot) ---------------------------------------------------------------------------------------------
     log.stage("switches")
     ok, num, url = Gitea().dispatch_and_wait("evpn-3tier-switches", log)
     _check(ok, f"evpn-3tier-switches run #{num} failed — {url}")
     log(f"evpn-3tier-switches run #{num} succeeded (inventory committed, checked, applied, verified): {url}")
-    # ---- 3 phpIPAM -------------------------------------------------------------------------------------------------------------
-    log.stage("phpipam")
-    ip = Ipam()
-    dom = next(d for d in ip.req("GET", "l2domains") if d["name"] == LOCATION)
-    have = {int(x["number"]): x for x in ip.req("GET", f"l2domains/{dom['id']}/vlans") or []}
-    if vid not in have: ip.req("POST", "vlan", json={"domainId": dom["id"], "number": vid, "name": p["name"], "description": f"tier VLAN, L2VNI {vni}, VRF {vrf} (request #{r.pk})"})
-    vlan_id = {int(x["number"]): x for x in ip.req("GET", f"l2domains/{dom['id']}/vlans")}[vid]["vlanId"]
-    sec = next(s for s in ip.req("GET", "sections") if s["name"] == LOCATION)
-    vrf_id = next(x["vrfId"] for x in ip.req("GET", "vrf") if x["name"] == vrf)
-    master = next(x for x in ip.req("GET", "subnets/cidr/172.16.0.0/16") if x["sectionId"] == sec["id"])
-    found = ip.req("GET", f"subnets/cidr/{net.network_address}/{net.prefixlen}")
-    sub = next((x for x in found or [] if x["sectionId"] == sec["id"]), None)
-    if sub is None:
-        ip.req("POST", "subnets", json={"subnet": str(net.network_address), "mask": net.prefixlen, "sectionId": sec["id"], "masterSubnetId": master["id"],
-                                        "vrfId": vrf_id, "vlanId": vlan_id, "description": f"VLAN {vid} — {vrf} tier (L2VNI {vni}), gateway {ipaddress.ip_interface(gw).ip} (anycast); request #{r.pk}"})
-        sub = next(x for x in ip.req("GET", f"subnets/cidr/{net.network_address}/{net.prefixlen}") if x["sectionId"] == sec["id"])
-    gw_ip = str(ipaddress.ip_interface(gw).ip)
-    if not any(a["ip"] == gw_ip for a in ip.req("GET", f"subnets/{sub['id']}/addresses") or []):
-        ip.req("POST", "addresses", json={"subnetId": sub["id"], "ip": gw_ip, "hostname": f"gw-{p['name']}", "is_gateway": 1,
-                                          "description": f"anycast gateway, every leaf{' + border' if 'borders' in span else ''}"[:64]})
-    log(f"phpIPAM: VLAN {vid}, subnet {net} (VRF {vrf}) and the gateway {gw_ip} reserved")
     # ---- 4 on the devices ----------------------------------------------------------------------------------------------------
     log.stage("checks")
     sys.path.insert(0, str(settings.LAB_DIR / "tools"))

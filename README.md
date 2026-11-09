@@ -142,11 +142,14 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   The WAN gets the fabric's subnets that reach VRF outside (today 172.16.10.0/24, the web tier) and nothing else — no
   loopbacks, transit, /31s or /32s, nor the default route back. *Add a VLAN* puts its subnet in the list (the switches
   pipeline) and checks both borders carry it.
-- **Add a VLAN, executed** (workflows/executors.py, every step idempotent): 1 Nautobot — the VLAN in the evpn-3tier plan
-  (config context), the native VLAN and its prefix in the VRF; 2 Gitea — the evpn-3tier-switches pipeline (inventory,
-  check, apply, verify), waited for, its run linked; 3 phpIPAM — VLAN, subnet, gateway reservation; 4 the devices — every
-  switch in the span carries VLAN -> VNI and the anycast gateway. Proven: request #2, VLAN 40 (app-backup, VRF app,
-  172.16.40.1/24) on leaf1-4.
+- **Add a VLAN, executed** (workflows/executors.py, every step idempotent) — **phpIPAM is the source of truth for
+  addressing, so it goes first**: 1 phpIPAM — reserve the VLAN, the subnet (its VRF and VLAN) and the gateway (first
+  host); every check runs before the first write, so a VLAN or subnet taken since the request was submitted refuses
+  the request with nothing changed (a retry recognises its own reservation by the request number); 2 Nautobot — from
+  phpIPAM's reservation, read back: the VLAN in the evpn-3tier plan (config context), the native VLAN and its prefix in
+  the VRF; 3 Gitea — the evpn-3tier-switches pipeline (inventory from Nautobot, check, apply, verify), waited for, its
+  run linked; 4 checks — every switch in the span carries VLAN -> VNI and the anycast gateway, both borders permit the
+  subnet to the WAN. Proven: request #9, VLAN 44 (vlan_44_db, 172.16.3.0/24).
 - **Load balancer peering, executed**: 1 Nautobot — the peering in the plan (config context `lb_peerings`), the peering
   VLAN and the prefixes; 2 the evpn-3tier-switches pipeline — on the switch pair, `br0.<VLAN>` (.1/.2) in the VRF and an
   eBGP neighbour (BFD optional) importing only the VIP prefixes, exporting nothing; 3 the evpn-3tier-loadbalancers
@@ -161,7 +164,7 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (35: forms, allocation, flows, approval, the log parser,
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (38: forms, allocation, phpIPAM-first order and its guards, flows, approval, the log parser,
   progress, the API); the front end type-checks in its build (`tsc -b`, strict).
 
 Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift
