@@ -178,3 +178,94 @@ class ApprovalTests(TestCase):
 
     def test_unknown_decision(self, _m):
         self.client.force_login(self.op); self.assertEqual(self.client.post(reverse("decide_request", args=[self.wr.pk, "bless"])).status_code, 404)
+
+
+# ---- live progress (0.11.0) -------------------------------------------------------------------------------------------------
+class PipelineLogTests(TestCase):
+    def test_ansible_and_verify_lines(self):
+        from .progress import PipelineLog
+        snap = {"steps": [{"name": "4 apply", "status": "running", "duration": "1s"}, {"name": "5 verify", "status": "waiting", "duration": ""}], "tail": []}
+        PipelineLog(snap).feed(0, ["PLAY [VyOS configuration] ****", "TASK [Push config] ****", "ok: [leaf1]", "changed: [border1]",
+                                   "fatal: [lb1]: FAILED! => {}", "skipping: [leaf2]", "\x1b[0;32mok: [leaf1] => (item=x)\x1b[0m"])
+        PipelineLog(snap).feed(1, ["PASS  leaf1: BGP 4/4", "FAIL  border1: BFD 11/12 up  — down: ['x']", "60 of 61 checks passed"])
+        h = snap["steps"][0]["hosts"]
+        self.assertEqual((snap["play"], snap["task"]), ("VyOS configuration", "Push config"))
+        self.assertEqual(h["leaf1"]["ok"], 2); self.assertEqual(h["border1"]["changed"], 1); self.assertEqual(h["lb1"]["failed"], 1); self.assertEqual(h["leaf2"]["skipped"], 1)
+        self.assertEqual((snap["verify"]["passed"], snap["verify"]["failed"], snap["verify"]["total"]), (1, 1, 61))
+        self.assertIn("border1: BFD", snap["verify"]["failures"][0])
+        self.assertTrue(all("\x1b" not in l for l in snap["tail"]))
+
+
+class ProgressTests(TestCase):
+    def setUp(self):
+        self.u = User.objects.create_user("p", password="p-password-123")
+        self.r = WorkflowRequest.objects.create(workflow="lb-peering", title="t", requested_by=self.u, status="running")
+
+    def test_stages_pipeline_and_percent(self):
+        from .progress import Progress
+        from .services import percent
+        p = Progress(self.r, (("nautobot", "Nautobot"), ("switches", "Switches"), ("checks", "Checks")))
+        p.stage("nautobot"); p("did a thing"); p.stage("switches")
+        snap = p.pipeline("evpn-3tier-switches"); snap = p.pipeline("evpn-3tier-switches", run=7, url="u")
+        snap["steps"] = [{"name": "a", "status": "success", "duration": "1s"}, {"name": "b", "status": "running", "duration": "1s"}]
+        p.save(force=True); self.r.refresh_from_db()
+        st = {s["key"]: s["status"] for s in self.r.progress["stages"]}
+        self.assertEqual(st, {"nautobot": "done", "switches": "running", "checks": "pending"})
+        self.assertEqual(list(self.r.progress["pipelines"]), ["evpn-3tier-switches#7"])          # the placeholder was re-keyed
+        self.assertEqual(percent(self.r), round(100 * (1 + 0.5) / 3))
+        p.finish(False); self.r.refresh_from_db()
+        self.assertEqual(self.r.progress["stages"][1]["status"], "failed")
+        # a retry starts the stages again, keeps the earlier pipeline runs
+        p2 = Progress(self.r, (("nautobot", "Nautobot"), ("switches", "Switches"), ("checks", "Checks")))
+        self.assertEqual(p2.p["attempt"], 2); self.assertIn("evpn-3tier-switches#7", p2.p["pipelines"])
+        self.assertTrue(p2.p["stages"][0]["previous"])
+
+
+@patched
+class ApiTests(TestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user("alice", password="alice-password-1")
+        self.op = User.objects.create_user("olga", password="olga-password-1")
+        ops = Group.objects.create(name="operators")
+        ops.permissions.add(*Permission.objects.filter(codename__in=["view_all_requests", "approve_requests"])); self.op.groups.add(ops)
+
+    def sign_in(self, user, password):
+        from django.test import Client
+        c = Client(enforce_csrf_checks=True)
+        tok = c.get("/api/session").json()["csrf"]
+        r = c.post("/api/session", {"username": user, "password": password}, content_type="application/json", HTTP_X_CSRFTOKEN=tok)
+        return c, r
+
+    def test_sign_in_csrf_and_wrong_password(self, _m):
+        from django.test import Client
+        c = Client(enforce_csrf_checks=True); c.get("/api/session")
+        self.assertEqual(c.post("/api/session", {"username": "alice", "password": "alice-password-1"}, content_type="application/json").status_code, 403)
+        _, r = self.sign_in("alice", "nope"); self.assertEqual(r.status_code, 401)
+        c, r = self.sign_in("alice", "alice-password-1"); self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["user"]["username"], "alice"); self.assertFalse(r.json()["can_approve"])
+        self.assertEqual(c.post("/api/requests", {"workflow": "add-vlan", "data": {}}, content_type="application/json").status_code, 403)  # no CSRF header
+
+    def test_create_validate_approve(self, _m):
+        c, r = self.sign_in("alice", "alice-password-1"); h = {"HTTP_X_CSRFTOKEN": r.json()["csrf"]}
+        bad = c.post("/api/requests", {"workflow": "add-vlan", "data": {**VLAN_OK, "vlan_id": 10}}, content_type="application/json", **h)
+        self.assertEqual(bad.status_code, 400); self.assertIn("vlan_id", bad.json()["errors"])
+        ok = c.post("/api/requests", {"workflow": "lb-peering", "data": {**LB_OK, "bfd": True}}, content_type="application/json", **h)
+        self.assertEqual(ok.status_code, 200, ok.content); rid = ok.json()["id"]
+        self.assertEqual(WorkflowRequest.objects.get(pk=rid).parameters["bfd"], True)
+        self.assertEqual(c.post(f"/api/requests/{rid}/approve", {"note": ""}, content_type="application/json", **h).status_code, 403)
+        self.assertEqual(c.get("/api/requests?scope=all").status_code, 403)
+        self.assertEqual([x["id"] for x in c.get("/api/requests?scope=mine").json()], [rid])
+        o, r = self.sign_in("olga", "olga-password-1"); ho = {"HTTP_X_CSRFTOKEN": r.json()["csrf"]}
+        self.assertEqual([x["id"] for x in o.get("/api/requests?scope=pending").json()], [rid])
+        d = o.post(f"/api/requests/{rid}/approve", {"note": "fine"}, content_type="application/json", **ho).json()
+        self.assertEqual((d["status"], d["decided_by"]["username"]), ("approved", "olga"))
+        self.assertEqual(o.post(f"/api/requests/{rid}/approve", {"note": ""}, content_type="application/json", **ho).status_code, 409)
+        self.assertEqual(c.post(f"/api/requests/{rid}/cancel", {"note": "changed my mind"}, content_type="application/json", **h).json()["status"], "cancelled")
+
+    def test_others_requests_hidden_and_stream_needs_sign_in(self, _m):
+        r = WorkflowRequest.objects.create(workflow="add-vlan", title="olga's", requested_by=self.op)
+        c, _ = self.sign_in("alice", "alice-password-1")
+        self.assertEqual(c.get(f"/api/requests/{r.pk}").status_code, 404)
+        from django.test import Client
+        self.assertEqual(Client().get("/api/stream").status_code, 403)
+        self.assertEqual(Client().get("/api/requests").status_code, 401)

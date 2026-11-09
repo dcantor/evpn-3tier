@@ -1,4 +1,4 @@
-"""A workflow request and its history. Executing requests (pipelines, Nautobot) comes later: the statuses for it exist."""
+"""A workflow request, its history, and its live progress while the worker carries it out."""
 from django.conf import settings
 from django.db import models
 from django.urls import reverse
@@ -25,6 +25,7 @@ class WorkflowRequest(models.Model):
     decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="decided_requests")
     decided_at = models.DateTimeField(null=True, blank=True)
     result = models.JSONField(default=dict, blank=True)          # what execution produced (pipeline runs, links)
+    progress = models.JSONField(default=dict, blank=True)        # the live snapshot while it runs (workflows/progress.py)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 

@@ -37,6 +37,7 @@ def add_vlan(r, log):
     net = ipaddress.ip_interface(gw).network
     nb = Nautobot()
     # ---- 1 Nautobot -------------------------------------------------------------------------------------------------------
+    log.stage("nautobot")
     ctx = nb.context(); data = ctx["data"]; vlans = data["evpn"]["vlans"]
     entry = {"vlan": vid, "vrf": vrf, "vni": vni, "gateway": gw, "on": span.split("+")}
     mine = next((v for v in vlans if v["vlan"] == vid), None)
@@ -66,10 +67,12 @@ def add_vlan(r, log):
         log(f"Nautobot: prefix {net} in namespace {LOCATION}, VRF {vrf}")
     labmodel.invalidate()
     # ---- 2 the switches pipeline ---------------------------------------------------------------------------------------------
+    log.stage("switches")
     ok, num, url = Gitea().dispatch_and_wait("evpn-3tier-switches", log)
     _check(ok, f"evpn-3tier-switches run #{num} failed — {url}")
     log(f"evpn-3tier-switches run #{num} succeeded (inventory committed, checked, applied, verified): {url}")
     # ---- 3 phpIPAM -------------------------------------------------------------------------------------------------------------
+    log.stage("phpipam")
     ip = Ipam()
     dom = next(d for d in ip.req("GET", "l2domains") if d["name"] == LOCATION)
     have = {int(x["number"]): x for x in ip.req("GET", f"l2domains/{dom['id']}/vlans") or []}
@@ -90,6 +93,7 @@ def add_vlan(r, log):
                                           "description": f"anycast gateway, every leaf{' + border' if 'borders' in span else ''}"[:64]})
     log(f"phpIPAM: VLAN {vid}, subnet {net} (VRF {vrf}) and the gateway {gw_ip} reserved")
     # ---- 4 on the devices ----------------------------------------------------------------------------------------------------
+    log.stage("checks")
     sys.path.insert(0, str(settings.LAB_DIR / "tools"))
     from labssh import inventory, run as ssh                                  # noqa: E402
     inv = inventory()
@@ -111,6 +115,7 @@ def lb_peering(r, log):
     net = ipaddress.ip_network(p["peering_subnet"]); vips = [ipaddress.ip_network(v) for v in p["vip_prefixes"]]
     nb = Nautobot()
     # ---- 1 Nautobot ------------------------------------------------------------------------------------------------------
+    log.stage("nautobot")
     ctx = nb.context(); data = ctx["data"]; peerings = data.get("lb_peerings", [])
     entry = {"name": lb, "switches": p["switches"], "vrf": vrf, "asn": asn, "vlan": vlan, "vni": vni, "subnet": str(net),
              "vips": [str(v) for v in vips], "bfd": bool(p["bfd"])}
@@ -138,10 +143,12 @@ def lb_peering(r, log):
     # ---- 2 + 3 the pipelines: the switches first (the peering VLAN must reach the load balancer), then the load balancer ---
     g = Gitea(); runs = {}
     for repo in ("evpn-3tier-switches", "evpn-3tier-loadbalancers"):
+        log.stage(repo.removeprefix("evpn-3tier-"))
         ok, num, url = g.dispatch_and_wait(repo, log)
         _check(ok, f"{repo} run #{num} failed — {url}")
         log(f"{repo} run #{num} succeeded: {url}"); runs[repo] = {"run": num, "url": url}
     # ---- 4 phpIPAM ---------------------------------------------------------------------------------------------------------
+    log.stage("phpipam")
     ip = Ipam()
     dom = next(d for d in ip.req("GET", "l2domains") if d["name"] == LOCATION)
     have = {int(x["number"]): x for x in ip.req("GET", f"l2domains/{dom['id']}/vlans") or []}
@@ -169,6 +176,7 @@ def lb_peering(r, log):
         address(vs, x.network_address + 1, f"vip-{lb}", f"VIP on {lb} (lo), HAProxy")
     log(f"phpIPAM: VLAN {vlan}, the peering subnet {net} with {', '.join(sw)} and {lb}, the VIP prefixes")
     # ---- 5 checks ----------------------------------------------------------------------------------------------------------
+    log.stage("checks")
     sys.path.insert(0, str(settings.LAB_DIR / "tools"))
     from labssh import inventory, run as ssh                                  # noqa: E402
     import time as _t

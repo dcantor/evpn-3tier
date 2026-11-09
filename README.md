@@ -92,15 +92,37 @@ report against lab.conf (VyOS repos) -> check mode with diff -> apply -> `lab.sh
 
 `lab.sh configure` / `services` still work (lab.conf); once Nautobot is edited they would push lab.conf's values back.
 
-## Self-service: request workflows (Django, `selfservice/`)
+## Self-service: request workflows (Django API + React front end, `selfservice/`)
 
-**http://192.168.50.231:8120/** — a Django 6.1 app where users **request workflows on the lab**; an operator approves,
-and a worker carries them out through the lab's own systems (user units `evpn-3tier-selfservice` — gunicorn,
-`./lab.sh selfservice` — and `evpn-3tier-selfservice-worker`; SQLite in selfservice/data/).
+**http://192.168.50.231:8120/** — users **request workflows on the lab**; an operator approves; a worker carries them out
+through the lab's own systems — and everyone **watches it happen live**: the stage, each Gitea pipeline's steps, the
+Ansible play and task running now, every device's ok / changed / failed results, verify's checks, the log as it is
+written, time left (from earlier runs).
 
 ```
-requester: submit  ->  operator: approve / reject  ->  worker: Nautobot -> Gitea pipeline -> phpIPAM -> check the devices  ->  done / failed (retry)
+browser (React, frontend/)  --/api/ JSON, session cookie + CSRF-->  Django + Django Ninja (ASGI: gunicorn + uvicorn)
+        ^                                                                  |  SQLite: requests, history, progress
+        +----------- /api/stream (server-sent events: "request N changed") +
+worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -> phpIPAM -> checks; writes progress
 ```
+
+- **Front end** — `selfservice/frontend/`, React 19 + TypeScript + Vite 7 (react-router 7; no UI kit: one stylesheet,
+  light / dark). Pages: overview (counts, requests in progress with live bars, approvals, your requests, the lab from
+  Nautobot), new request (the forms are generated from the server's — validation stays in one place), a request (live
+  stepper, a card per pipeline run: Gitea steps with durations, now-running task, a device grid, verify meter, live log,
+  any step's full log; history; approve / reject / retry / cancel), all requests and approvals (operators).
+  Built by `frontend/build.sh` into `frontend/dist/`, served by Django at `/static/app/` (whitenoise); the service builds
+  it when its sources are newer. Node 24 LTS in `~/.local/share/node` (`tools/install_node.sh`, checksum-verified) is
+  needed only to build. Same origin as the API: no CORS, no tokens in the browser.
+- **API** — `/api/`, Django Ninja, OpenAPI docs at **/api/docs**: session (sign in / out), lab, catalog and form
+  definitions, requests (list by scope, counts, create, detail, approve / reject / retry / cancel), a pipeline step's
+  whole log (read live from Gitea). **/api/stream** — server-sent events: once a second, the requests that changed;
+  the browser fetches them again. No message broker: one indexed query a second per open tab.
+- **Live progress** — the worker keeps a snapshot on the request (`progress`, workflows/progress.py): the workflow's
+  stages, and per pipeline run its Gitea steps plus what its live log says (Ansible PLAY / TASK lines, per-host
+  results, verify PASS / FAIL). Gitea 1.24 has no API for a running job's log: the worker reads the endpoint Gitea's own
+  web UI uses (`POST /<repo>/actions/runs/<n>/jobs/0`, log cursors — only new lines), signed in as `lab`.
+- **Classic pages** (the first, server-rendered UI) stay at **/classic/** as a fallback.
 
 - **Catalog** (selfservice/workflows/catalog.py, forms.py): *Add a VLAN to the fabric* (VLAN ID, name, VRF, gateway prefix,
   leaves or leaves + borders) and *Set up a load balancer to peer with the fabric* (a load balancer from Nautobot — its
@@ -127,7 +149,8 @@ requester: submit  ->  operator: approve / reject  ->  worker: Nautobot -> Gitea
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (26).
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (31: forms, flows, approval, the log parser,
+  progress, the API); the front end type-checks in its build (`tsc -b`, strict).
 
 Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift
 report shows it, and `lab.sh configure` (lab.conf) would not remove it (additive).

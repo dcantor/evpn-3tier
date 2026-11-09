@@ -8,7 +8,9 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
+from workflows.catalog import BY_SLUG
 from workflows.executors import EXECUTORS, NotAutomated
+from workflows.progress import Progress
 from workflows.models import WorkflowRequest as R
 
 
@@ -20,7 +22,9 @@ class Command(BaseCommand):
 
     def handle(self, *a, once=False, **kw):
         for r in R.objects.filter(status=R.Status.RUNNING):
-            r.status = R.Status.FAILED; r.save(update_fields=["status", "updated"])
+            r.status = R.Status.FAILED
+            if r.progress: r.progress = {**r.progress, "current": None, "stages": [{**s, "status": "failed"} if s["status"] == "running" else s for s in r.progress.get("stages", [])]}
+            r.save(update_fields=["status", "progress", "updated"])
             r.log(None, "failed", "interrupted: the worker restarted while it ran (its steps can be retried)")
         self.stdout.write("worker: waiting for approved requests")
         while True:
@@ -34,15 +38,17 @@ class Command(BaseCommand):
     def carry_out(self, r):                    # (not "execute": that is BaseCommand's own)
         self.stdout.write(f"#{r.pk} {r.title}: running")
         r.log(None, "started", "the worker started carrying it out")
+        prog = Progress(r, BY_SLUG[r.workflow].stages)
         try:
-            result = EXECUTORS[r.workflow](r, lambda msg: r.log(None, "step", msg)) or {}
+            result = EXECUTORS[r.workflow](r, prog) or {}
             r.result = {**result, "finished": timezone.now().isoformat()}; r.status = R.Status.DONE
+            prog.finish(True)
             r.log(None, "done", "carried out")
         except NotAutomated as e:
-            r.status = R.Status.FAILED; r.result = {"not_automated": True}
+            r.status = R.Status.FAILED; r.result = {"not_automated": True}; prog.finish(False)
             r.log(None, "not automated", str(e))
         except Exception as e:                                               # noqa: BLE001
-            r.status = R.Status.FAILED; r.result = {"error": f"{type(e).__name__}: {e}"}
+            r.status = R.Status.FAILED; r.result = {"error": f"{type(e).__name__}: {e}"}; prog.finish(False)
             r.log(None, "failed", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()[-1500:]}")
         r.save(update_fields=["status", "result", "updated"])
         self.stdout.write(f"#{r.pk}: {r.status}")

@@ -2,6 +2,24 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0] - 2026-11-09
+
+### Added
+- A new self-service front end: React 19 + TypeScript + Vite 7 (selfservice/frontend/), on a JSON API (Django Ninja,
+  /api/, docs at /api/docs) with live updates (/api/stream, server-sent events). Overview with live progress,
+  approvals, your requests and the lab; forms generated from the server's; a request page with a live stepper and a
+  card per pipeline run (Gitea steps, the Ansible play and task running now, per-device ok / changed / failed, verify
+  X / 61, the live log, any step's whole log); toasts on status changes; light / dark; phone layout.
+- Live pipeline progress: the worker follows each Gitea run's job log while it runs (Gitea's web endpoint — the API has
+  none) and keeps a progress snapshot on the request (stages, steps, hosts, verify, log tail, estimate from earlier runs).
+- The app runs on ASGI (gunicorn + uvicorn workers); the service migrates, builds the front end when needed and collects
+  static files at start. tools/install_node.sh: Node 24 LTS (checksum-verified) for the build. 31 tests.
+- Proven with request #4: lb2 peering (AS 65320, VLAN 160, 172.16.160.0/29, VIP 172.16.210.1) — watched live end to end.
+
+### Changed
+- The server-rendered pages moved to /classic/ (fallback). Request actions (approve / reject / retry / cancel) live in
+  workflows/services.py, shared by the API and the classic pages.
+
 ## [0.10.0] - 2026-11-09
 
 ### Added

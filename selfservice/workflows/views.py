@@ -12,22 +12,13 @@ from .catalog import BY_SLUG, CATALOG
 from .models import WorkflowRequest
 
 
-def is_operator(user):
-    return user.is_superuser or user.has_perm("workflows.view_all_requests")
-
-
-def can_approve(user):
-    return user.is_superuser or user.has_perm("workflows.approve_requests")
+from .services import Refused, can_approve, is_operator, visible   # noqa: E402
+from . import services   # noqa: E402
 
 
 def lab_context(request):
     return {"is_operator": request.user.is_authenticated and is_operator(request.user),
             "can_approve": request.user.is_authenticated and can_approve(request.user)}
-
-
-def visible(user):
-    qs = WorkflowRequest.objects.select_related("requested_by")
-    return qs if is_operator(user) else qs.filter(requested_by=user)
 
 
 @login_required
@@ -70,17 +61,11 @@ def request_detail(request, pk):
 @require_POST
 def decide_request(request, pk, decision):
     """An operator approves (the worker carries it out) or rejects a submitted request; or retries a failed one."""
-    if decision not in ("approve", "reject", "retry"): raise Http404("no such decision")
+    if decision not in services.DECISIONS: raise Http404("no such decision")
     if not can_approve(request.user): raise PermissionDenied
     r = get_object_or_404(WorkflowRequest, pk=pk)
-    note = request.POST.get("note", "").strip()
-    want = {"approve": WorkflowRequest.Status.SUBMITTED, "reject": WorkflowRequest.Status.SUBMITTED, "retry": WorkflowRequest.Status.FAILED}[decision]
-    if r.status != want:
-        messages.error(request, f"#{r.pk} is {r.get_status_display().lower()}: it cannot be {decision}d now."); return redirect(r)
-    r.status = WorkflowRequest.Status.REJECTED if decision == "reject" else WorkflowRequest.Status.APPROVED
-    r.decided_by, r.decided_at = request.user, timezone.now()
-    r.save(update_fields=["status", "decided_by", "decided_at", "updated"])
-    r.log(request.user, {"approve": "approved", "reject": "rejected", "retry": "retry"}[decision], note)
+    try: services.decide(r, request.user, decision, request.POST.get("note", ""))
+    except Refused as e: messages.error(request, str(e)); return redirect(r)
     messages.success(request, {"approve": f"#{r.pk} approved: the worker carries it out now.", "reject": f"#{r.pk} rejected.",
                                "retry": f"#{r.pk} queued again."}[decision])
     return redirect(r)
@@ -90,11 +75,8 @@ def decide_request(request, pk, decision):
 @require_POST
 def cancel_request(request, pk):
     r = get_object_or_404(visible(request.user), pk=pk)
-    if r.status not in WorkflowRequest.OPEN: messages.error(request, f"#{r.pk} is {r.get_status_display().lower()}: it can no longer be cancelled.")
-    elif r.requested_by != request.user and not is_operator(request.user): raise PermissionDenied
-    else:
-        r.status = WorkflowRequest.Status.CANCELLED; r.save(update_fields=["status", "updated"])
-        r.log(request.user, "cancelled", request.POST.get("note", "")); messages.info(request, f"Request #{r.pk} cancelled.")
+    try: services.cancel(r, request.user, request.POST.get("note", "")); messages.info(request, f"Request #{r.pk} cancelled.")
+    except Refused as e: messages.error(request, str(e))
     return redirect(r)
 
 

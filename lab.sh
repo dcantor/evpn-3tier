@@ -321,7 +321,15 @@ cmd_db() { need_python; "$PY" "$LAB_DIR/tools/dbctl.py" "$@"; }       # status |
 cmd_test() { need_python; exec "$LAB_DIR/tests/run.sh" "$@"; }       # the Robot Framework suites (results/<timestamp>/)
 cmd_selfservice() {   # the self-service app (selfservice/, Django) on :8120; as a service: evpn-3tier-selfservice
   [[ -x "$LAB_DIR/selfservice/.venv/bin/gunicorn" ]] || "$LAB_DIR/selfservice/setup.sh"
-  cd "$LAB_DIR/selfservice" && exec .venv/bin/gunicorn selfservice.wsgi --bind 0.0.0.0:"${SELFSERVICE_PORT:-8120}" --workers 2 --access-logfile - --error-logfile -
+  cd "$LAB_DIR/selfservice"
+  # the React front end (frontend/): built when missing or older than its sources; then its files collected for whitenoise
+  if [[ ! -f frontend/dist/index.html ]] || [[ -n "$(find frontend/src frontend/index.html frontend/package-lock.json -newer frontend/dist/index.html 2>/dev/null | head -1)" ]]; then
+    frontend/build.sh || echo "selfservice: the front end did not build (the API and /classic/ still work)" >&2
+  fi
+  .venv/bin/python manage.py migrate --noinput -v0 && .venv/bin/python manage.py collectstatic --noinput -v0
+  # ASGI (uvicorn workers): the live event stream (/api/stream) holds a connection per open tab
+  exec .venv/bin/gunicorn selfservice.asgi:application -k uvicorn_worker.UvicornWorker --bind 0.0.0.0:"${SELFSERVICE_PORT:-8120}" \
+    --workers 2 --graceful-timeout 5 --access-logfile - --error-logfile -
 }
 cmd_ipam() { need_python; "$PY" "$LAB_DIR/tools/phpipam_load.py" "$@"; }   # load the lab's subnets and addresses into phpIPAM
 cmd_services() { need_python; "$PY" "$LAB_DIR/tools/services.py" "$@"; }   # the application: db, app, web, lb (tools/services.py)
