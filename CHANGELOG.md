@@ -2,6 +2,16 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.0] - 2026-11-09
+
+### Added
+- Standard Firewall Rules: ICMP to every tier VLAN from every other zone (outside and the other tiers). In Nautobot's
+  fw_policy as entries tagged standard (backfilled for VLANs 10, 20, 30, 40-44: 24 entries), on the firewalls as rule
+  1000 + VLAN ID (firewalls run #8); the lab's renderer derives them. TCP policy unchanged (full verify 65/65).
+- Add a VLAN: a *Standard firewall rules* stage, firewall checks, and a final *Ping test from the WAN* (from
+  198.51.100.1): every web, app and db VM and the new VLAN's gateway must answer. Remove a VLAN deletes the rules and
+  checks they are gone. Proven: requests #14 (VLAN 45 added, 7/7 targets answer) and #15 (removed). 50 tests.
+
 ## [0.17.1] - 2026-11-09
 
 ### Added

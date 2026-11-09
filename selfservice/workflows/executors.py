@@ -6,8 +6,10 @@ add-vlan       (phpIPAM is the source of truth for addressing: it is written fir
                (its first host) — refused, with nothing changed, if any of it was taken since the request was submitted
   2 Nautobot   from phpIPAM's reservation (read back): the VLAN in the evpn-3tier plan (config context: VLAN, VRF, VNI,
                gateway, span) — what the pipelines render from — plus the native VLAN and its prefix (in the VRF)
+  2b rules     Standard Firewall Rules in Nautobot's fw_policy: ICMP to the VLAN from every other zone (fwrules.py)
   3 Gitea      the evpn-3tier-switches pipeline: inventory from Nautobot, check, apply to the leaves / borders, verify;
-               then evpn-3tier-firewalls: the subnet into PUBLIC (what outside, and so the WAN, learns)
+               then evpn-3tier-firewalls: the subnet into PUBLIC (what outside, and so the WAN, learns), the ICMP rules
+  4 checks     (below) + 5 ping   from the WAN: every web, app and db VM and the new VLAN's gateway
   4 checks     every switch in the span carries the VLAN (vlan-to-vni) and its anycast gateway; both borders permit the
                subnet to the WAN (prefix-list FABRIC-SUBNETS, called by route-map TO-WAN on the eBGP sessions to the WAN)
 remove-vlan    (the mirror of add-vlan; phpIPAM last: addresses are released only once nothing uses them)
@@ -30,7 +32,7 @@ import sys
 
 from django.conf import settings
 
-from . import allocate, labmodel
+from . import allocate, fwrules, labmodel
 from .clients import LOCATION, Gitea, Ipam, Nautobot
 
 
@@ -63,6 +65,49 @@ def _fw_and_wan(inv, ssh, vid, net, present, log):
     _check(seen == present, f"the WAN {'has not learned' if present else 'still has'} {net}")
     log(f"routes to outside: {', '.join(fws)} {'export' if present else 'no longer export'} {net} (prefix-list PUBLIC rule {vid}); "
         f"the WAN {'learns' if present else 'no longer has'} it — traffic stays subject to the firewall zone policy")
+
+
+def _fw_standard(inv, ssh, vid, vrf, net, present, log):
+    """Both firewalls carry (or no longer carry) the VLAN's Standard Firewall Rules: rule 1000 + VLAN ID, ICMP to its
+    subnet, in every zone pair from another zone to its VRF."""
+    n = fwrules.rule_number(vid); fws = [x["name"] for x in inv["nodes"] if x["role"] == "fw"]
+    pairs = [f"{z.upper()}-{vrf.upper()}" for z in fwrules.ZONES if z != vrf]
+    bad = []
+    for fw in fws:
+        _, out = ssh(fw, f"/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration commands | grep -E ' rule {n} '", inv=inv, timeout=120)
+        out = out.replace("'", "")
+        for pr in pairs:
+            has = (f"name {pr} rule {n} protocol icmp" in out and f"name {pr} rule {n} destination address {net}" in out
+                   and f"name {pr} rule {n} action accept" in out)
+            if has != present: bad.append(f"{fw} {pr}")
+    _check(not bad, f"Standard Firewall Rules for VLAN {vid} {'missing' if present else 'still there'} on: {', '.join(bad)}")
+    log(f"Standard Firewall Rules: {', '.join(fws)} {'allow' if present else 'no longer have'} ICMP to {net} "
+        f"({', '.join(pairs)}, rule {n})")
+
+
+def _ping_from_wan(inv, ssh, extra, log):
+    """Ping every web, app and db VM (and `extra` targets) from the WAN, sourced from the WAN's client range — the path
+    a user outside takes: WAN -> border -> outside VRF -> firewall (Standard Firewall Rules) -> tier VRF -> VM."""
+    import re as _re
+    wan = next(x["name"] for x in inv["nodes"] if x["role"] == "wan")
+    src = str(ipaddress.ip_network(inv["wan"]["clients"]).network_address + 1)
+    targets = [(f"{x['name']} ({x['net']['vrf']})", x["net"]["address"].split("/")[0]) for x in inv["nodes"]
+               if x["role"] in ("web", "app", "db") and x.get("net")] + list(extra)
+    script = "; ".join(f"echo '@@{i}'; ping -n -c 3 -i 0.3 -W 2 -I {src} {ip} | tail -2" for i, (_, ip) in enumerate(targets))
+    _, out = ssh(wan, script, inv=inv, timeout=120)
+    parts = _re.split(r"^@@(\d+)\s*$", out, flags=_re.M)
+    res = {int(parts[i]): parts[i + 1] for i in range(1, len(parts) - 1, 2)}
+    rows, failed = [], []
+    for i, (label, ip) in enumerate(targets):
+        o = res.get(i, "")
+        m = _re.search(r"(\d+) received", o); rtt = _re.search(r"= [\d.]+/([\d.]+)/", o)
+        got = int(m.group(1)) if m else 0
+        rows.append({"target": label, "ip": ip, "received": got, "sent": 3, "rtt_ms": float(rtt.group(1)) if rtt else None})
+        if got < 2: failed.append(f"{label} {ip} ({got}/3)")
+    log("ping from the WAN (" + src + "): " + "; ".join(f"{r['target']} {r['ip']} {r['received']}/3" + (f" {r['rtt_ms']:.1f} ms" if r["rtt_ms"] else "") for r in rows))
+    _check(not failed, f"not reachable by ping from the WAN: {', '.join(failed)}")
+    log(f"ping test passed: all {len(rows)} targets answer from the WAN")
+    return rows
 
 
 def add_vlan(r, log):
@@ -132,6 +177,17 @@ def add_vlan(r, log):
         nb.patch(f"ipam/prefixes/{pf['id']}", {"location": nb.one("dcim/locations", name=LOCATION)["id"]})
         nb.post("ipam/vrf-prefix-assignments", {"vrf": vrf_obj["id"], "prefix": pf["id"]})
         log(f"Nautobot: prefix {net} in namespace {LOCATION}, VRF {vrf}")
+    # ---- 2b Standard Firewall Rules: ICMP to the VLAN from every other zone, in Nautobot's fw_policy ----------------------
+    log.stage("rules")
+    ctx = nb.context(); data = ctx["data"]; before = data.get("fw_policy", [])
+    after, _ = fwrules.merge(before, vid, vrf, net)
+    mine = fwrules.for_vlan(vid, vrf, net)
+    if all(m in before for m in mine):
+        log(f"Standard Firewall Rules: VLAN {vid}'s are already in Nautobot (a retry)")
+    else:
+        data["fw_policy"] = after; nb.patch(f"extras/config-contexts/{ctx['id']}", {"data": data})
+        log(f"Standard Firewall Rules in Nautobot: ICMP to VLAN {vid} ({net}) from {', '.join(m['from'] for m in mine)} — "
+            f"firewall rule {fwrules.rule_number(vid)} in each zone pair")
     labmodel.invalidate()
     # ---- 3 the switches pipeline (renders from Nautobot) ---------------------------------------------------------------------------------------------
     log.stage("switches")
@@ -142,7 +198,7 @@ def add_vlan(r, log):
     log.stage("firewalls")
     fok, fnum, furl = Gitea().dispatch_and_wait("evpn-3tier-firewalls", log)
     _check(fok, f"evpn-3tier-firewalls run #{fnum} failed — {furl}")
-    log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid}): {furl}")
+    log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid}, the standard ICMP rules {fwrules.rule_number(vid)}): {furl}")
     # ---- 5 on the devices ----------------------------------------------------------------------------------------------------
     log.stage("checks")
     sys.path.insert(0, str(settings.LAB_DIR / "tools"))
@@ -171,7 +227,11 @@ def add_vlan(r, log):
     _check(not bad, f"the WAN export policy lacks {net} on: {', '.join(bad)}")
     log(f"WAN export policy: {', '.join(borders)} permit {net} to the WAN (prefix-list FABRIC-SUBNETS rule {vid}, route-map TO-WAN on the eBGP sessions to the WAN)")
     _fw_and_wan(inv, ssh, vid, net, present=True, log=log)
-    return {"switches_run": num, "switches_run_url": url, "firewalls_run": fnum, "firewalls_run_url": furl, "switches": switches}
+    _fw_standard(inv, ssh, vid, vrf, net, present=True, log=log)
+    # ---- 6 the ping test: from the WAN, every web, app and db VM, and the new VLAN's gateway --------------------------------
+    log.stage("ping")
+    pings = _ping_from_wan(inv, ssh, [(f"VLAN {vid} gateway (leaves)", str(ipaddress.ip_interface(gw).ip))], log)
+    return {"ping": pings, "switches_run": num, "switches_run_url": url, "firewalls_run": fnum, "firewalls_run_url": furl, "switches": switches}
 
 
 def lb_peering(r, log):
@@ -301,6 +361,11 @@ def remove_vlan(r, log):
         log(f"Nautobot: VLAN {vid} out of the evpn-3tier plan")
     else:
         log(f"Nautobot: VLAN {vid} already out of the plan (a retry)")
+    ctx = nb.context(); data = ctx["data"]
+    pol, n_removed = fwrules.drop(data.get("fw_policy", []), vid)
+    if n_removed:
+        data["fw_policy"] = pol; nb.patch(f"extras/config-contexts/{ctx['id']}", {"data": data})
+        log(f"Nautobot: VLAN {vid}'s {n_removed} Standard Firewall Rules (ICMP, rule {fwrules.rule_number(vid)}) removed")
     ns = nb.one("ipam/namespaces", name=LOCATION)
     pf = nb.one("ipam/prefixes", prefix=str(net), namespace=ns["id"])
     if pf: nb.delete(f"ipam/prefixes/{pf['id']}"); log(f"Nautobot: prefix {net} deleted")
@@ -332,6 +397,7 @@ def remove_vlan(r, log):
     _check(not left, "still on the switches: " + "; ".join(f"{k}: {v[0]}" + (f" (+{len(v) - 1})" if len(v) > 1 else "") for k, v in left.items()))
     log(f"on the devices: no trace of VLAN {vid} / VNI {vni} / {net} on {', '.join(switches)}")
     _fw_and_wan(inv, ssh, vid, net, present=False, log=log)
+    _fw_standard(inv, ssh, vid, vrf, net, present=False, log=log)
     # ---- 5 phpIPAM last: release the addresses --------------------------------------------------------------------------------
     log.stage("phpipam")
     if sub is not None:

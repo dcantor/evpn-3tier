@@ -338,6 +338,13 @@ def fw_policy(inv, n):
                         if p["port"]: c.append(f"{r} destination port {p['port']}")
                         if p["proto"] == "tcp": c.append(f"{r} state new")
                         i += 10
+                    # Standard Firewall Rules: ICMP to every tier VLAN from every other zone, rule 1000 + VLAN ID
+                    # (the self-service app keeps them in Nautobot's fw_policy, tagged standard; derived here alike)
+                    for v in sorted(inv["evpn"]["vlans"], key=lambda v: v["vlan"]):
+                        if v["vrf"].upper() != dst or src == dst or src not in ("OUTSIDE", "WEB", "APP", "DB"): continue
+                        net = ipaddress.ip_interface(v["gateway"]).network; r = f"{name} rule {1000 + v['vlan']}"
+                        c += [f"{r} action accept", f"{r} protocol icmp", f"{r} destination address {net}",
+                              f"{r} description 'standard: ICMP to VLAN {v['vlan']} ({v['vrf']} {net})'"]
             c.append(f"set firewall zone {dst} from {src} firewall name {fw}")
     for zone, ifs in z.items():
         c += [f"set firewall zone {zone} default-action drop", f"set firewall zone {zone} intra-zone-filtering action accept",

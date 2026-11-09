@@ -501,3 +501,16 @@ class AsPathTests(TestCase):
         self.assertIsNone(parse_frr_paths("not json"))
         self.assertTrue(applies("aspath", {"kind": "vyos", "role": "spine"})); self.assertTrue(applies("aspath", {"kind": "linux", "role": "lb"}))
         self.assertFalse(applies("aspath", {"kind": "linux", "role": "db"}))
+
+
+class StandardRuleTests(TestCase):
+    def test_for_vlan_merge_drop(self):
+        from . import fwrules
+        r = fwrules.for_vlan(42, "app", "172.16.1.0/24")
+        self.assertEqual(sorted(x["from"] for x in r), ["db", "outside", "web"])
+        self.assertTrue(all(x["proto"] == "icmp" and x["dest"] == "172.16.1.0/24" and x["standard"] and x["vlan"] == 42 for x in r))
+        custom = [{"from": "outside", "to": "web", "dest": "172.16.10.10", "proto": "tcp", "port": "443"}]
+        pol, _ = fwrules.merge(custom, 42, "app", "172.16.1.0/24"); pol2, _ = fwrules.merge(pol, 42, "app", "172.16.1.0/24")
+        self.assertEqual(len(pol), 4); self.assertEqual(pol, pol2)                    # idempotent
+        kept, n = fwrules.drop(pol, 42); self.assertEqual((kept, n), (custom, 3))
+        self.assertEqual(fwrules.rule_number(42), 1042)

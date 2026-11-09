@@ -158,6 +158,12 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   Routes only: the zone-based firewall still drops every flow outside may not start — from the WAN only the web VIP
   (HTTPS) and the order API pass; app and db stay unreachable (verify's policy matrix: 35 flows from outside, 2 allowed).
   Add / Remove a VLAN run the firewalls pipeline too and check both firewalls and the WAN.
+- **Standard Firewall Rules**: every tier VLAN is open to **ICMP from every other zone** (outside — the WAN — and the
+  other tiers). Kept in Nautobot's `fw_policy` as entries tagged `standard` (selfservice/workflows/fwrules.py), rendered
+  on the firewalls as rule **1000 + VLAN ID** in each zone pair (stable: nothing renumbers); the lab's renderer derives
+  the same. Add a VLAN writes its set (stage *Standard firewall rules*) and ends with a **ping test from the WAN** (from
+  its client range, 198.51.100.1): every web, app and db VM and the new VLAN's gateway must answer. Remove a VLAN deletes
+  its set. TCP is unchanged (verify's policy matrix: same flows allowed).
 - **Add a VLAN, executed** (workflows/executors.py, every step idempotent) — **phpIPAM is the source of truth for
   addressing, so it goes first**: 1 phpIPAM — reserve the VLAN, the subnet (its VRF and VLAN) and the gateway (first
   host); every check runs before the first write, so a VLAN or subnet taken since the request was submitted refuses
@@ -188,7 +194,7 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   reject or retry. Accounts in Django admin (/admin/). Admin account and secret key: `~/.config/evpn-3tier/selfservice.env`.
 - **Credentials** for the worker are read at run time (Nautobot token and Gitea password from the NMS, phpIPAM's from
   ~/.config/evpn-3tier/phpipam.env); none in git.
-- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (49: forms, allocation, removal, device tools (redaction, parsing, AS paths), phpIPAM-first order and its guards, flows, approval, the log parser,
+- Tests: `cd selfservice && .venv/bin/python manage.py test workflows` (50: forms, allocation, standard rules, removal, device tools (redaction, parsing, AS paths), phpIPAM-first order and its guards, flows, approval, the log parser,
   progress, the API); the front end type-checks in its build (`tsc -b`, strict).
 
 Note: a VLAN or peering added through the app lives in Nautobot (and on the devices), not in lab.conf: the VyOS pipelines' drift
