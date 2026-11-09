@@ -173,3 +173,206 @@ class LbPeeringForm(RequestForm):
     def params(self):
         p = super().params(); lb = _model()["lbs"][p["device"]]
         p.update(attach_to=lb["pair"], switches=lb["switches"], vrf=lb["vrf"], vni=10000 + p["peering_vlan"]); return p
+
+
+# ---- change a VLAN's span ---------------------------------------------------------------------------------------------------
+SPANS = [("leaves", "every leaf"), ("leaves+borders", "every leaf and both border leaves")]
+
+
+def _open(workflow=None, **params):
+    """Open requests (submitted, approved, running), optionally of one workflow / with these parameters."""
+    from .models import WorkflowRequest as R
+    q = R.objects.filter(status__in=("submitted", "approved", "running"))
+    if workflow: q = q.filter(workflow=workflow)
+    for k, v in params.items(): q = q.filter(**{f"parameters__{k}": v})
+    return q
+
+
+def _border_hosts(m, vid):
+    """VMs on the border leaves whose bond carries this VLAN: the VLAN must stay on the borders for them."""
+    borders = set(m["switch_pairs"].get("border leaves", []))
+    return [h["name"] for h in m.get("hosts", []) if vid in (h.get("vlans") or []) and borders & set(h.get("peers") or [])]
+
+
+class VlanSpanForm(RequestForm):
+    """Where a tier VLAN lives: on every leaf, or on the leaves and both border leaves (where the firewalls and the load
+    balancers attach). Taking the borders away is refused while something attached to them uses the VLAN."""
+    field_order = ["vlan", "span", "reason"]
+    vlan = forms.ChoiceField(label="VLAN", help_text="A tier VLAN from Nautobot's plan, with where it is now.")
+    span = forms.ChoiceField(label="New span", choices=SPANS, help_text="Borders too when something attached to them (a load balancer, a firewall) needs the VLAN.")
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.fields["vlan"].choices = [(str(v["vlan"]), f"{v['vlan']} {v['name'] or ''} — VRF {v['vrf']}, {v['subnet']}, now on {' + '.join(v['on'])}")
+                                       for v in _model().get("vlans", [])]
+
+    def clean(self):
+        c = super().clean()
+        if "vlan" not in c or "span" not in c: return c
+        m = _model(); vid = int(c["vlan"]); v = next(x for x in m["vlans"] if x["vlan"] == vid)
+        new = c["span"].split("+")
+        if sorted(new) == sorted(v["on"]): raise forms.ValidationError(f"VLAN {vid} is already on {' + '.join(v['on'])}.")
+        if "borders" in v["on"] and "borders" not in new and (users := _border_hosts(m, vid)):
+            raise forms.ValidationError(f"VLAN {vid} must stay on the border leaves: {', '.join(users)} attached to them use it.")
+        if _open(vlan_id=vid).exists(): raise forms.ValidationError(f"An open request already changes VLAN {vid}.")
+        c["vlan"] = vid
+        return c
+
+    def params(self):
+        v = next(x for x in _model()["vlans"] if x["vlan"] == self.cleaned_data["vlan"])
+        return {"vlan_id": v["vlan"], "name": v["name"] or f"VLAN {v['vlan']}", "vrf": v["vrf"], "vni": v["vni"], "gateway": v["gateway"],
+                "subnet": v["subnet"], "span_from": "+".join(v["on"]), "span_to": self.cleaned_data["span"]}
+
+
+# ---- custom firewall rules ------------------------------------------------------------------------------------------------------
+ZONES = [("outside", "outside (the WAN / internet)"), ("web", "web"), ("app", "app"), ("db", "db")]
+PROTOS = [("tcp", "TCP"), ("udp", "UDP"), ("icmp", "ICMP (ping)")]
+PORTS = re.compile(r"^(\d{1,5})(?:-(\d{1,5}))?$")
+NOT_OUTSIDE = [ipaddress.ip_network(n) for n in ("172.16.0.0/16", "172.31.0.0/16", "10.18.0.0/24", "10.61.0.0/24", "10.255.0.0/16")]
+
+
+def zone_space(m, zone):
+    """The addresses a tier zone owns: its VLANs' subnets, its load balancer VIP ranges, and the web VIP for web."""
+    nets = [ipaddress.ip_network(v["subnet"]) for v in m.get("vlans", []) if v["vrf"] == zone]
+    nets += [ipaddress.ip_network(x) for p in m.get("lb_peerings", []) if p["vrf"] == zone for x in p["vips"]]
+    if zone == "web" and m.get("web_vip"): nets.append(ipaddress.ip_network(m["web_vip"]))
+    return nets
+
+
+def _ports(s):
+    m_ = PORTS.match(s or "")
+    if not m_: return None
+    a, b = int(m_.group(1)), int(m_.group(2) or m_.group(1))
+    return (a, b) if 1 <= a <= b <= 65535 else None
+
+
+def covers(rule, frm, to, proto, dest, port):
+    """Does an existing rule already allow this (same zones and protocol, its destination containing ours, its ports ours)?"""
+    if rule["from"] != frm or rule["to"] != to or rule["proto"] != proto: return False
+    if not ipaddress.ip_network(dest, strict=False).subnet_of(ipaddress.ip_network(rule["dest"], strict=False)): return False
+    if proto == "icmp": return True
+    have, want = _ports(str(rule.get("port") or "")), _ports(port or "")
+    return bool(have and want and have[0] <= want[0] and want[1] <= have[1])
+
+
+class FwRuleForm(RequestForm):
+    """A connection the zone firewall should let start: from one zone to an address or subnet in another, by protocol
+    and port. Replies are always allowed; everything not listed stays dropped and logged."""
+    field_order = ["source", "target", "proto", "dest", "port", "reason"]
+    source = forms.ChoiceField(label="From zone", choices=ZONES, help_text="Where the connection starts: the WAN (outside) or a tier VRF.")
+    target = forms.ChoiceField(label="To zone", choices=ZONES, help_text="The zone the destination is in.")
+    proto = forms.ChoiceField(label="Protocol", choices=PROTOS)
+    dest = forms.CharField(label="Destination", max_length=43, help_text="An address or a subnet in the 'to' zone, e.g. 172.16.20.11 or 172.16.20.0/24.")
+    port = forms.CharField(label="Port", required=False, max_length=11, help_text="TCP / UDP: a port or a range, e.g. 8443 or 9000-9010. Empty for ICMP.")
+
+    def clean(self):
+        c = super().clean()
+        frm, to, proto, dest, port = c.get("source"), c.get("target"), c.get("proto"), (c.get("dest") or "").strip(), (c.get("port") or "").strip()
+        if not (frm and to and proto and dest): return c
+        if frm == to: raise forms.ValidationError("From and to are the same zone: traffic inside a VRF does not cross the firewall.")
+        try: net = ipaddress.ip_network(dest, strict=True)
+        except ValueError: raise forms.ValidationError(f"Destination '{dest}': an IPv4 address or a subnet (network address / length).")
+        if net.version != 4: raise forms.ValidationError("IPv4 only.")
+        m = _model()
+        if to == "outside":
+            if net.prefixlen < 8: raise forms.ValidationError("Outside destinations: /8 or longer (no 'anything').")
+            if any(net.overlaps(x) for x in NOT_OUTSIDE): raise forms.ValidationError(f"{net} is inside the lab, not outside.")
+        elif not any(net.subnet_of(x) for x in zone_space(m, to)):
+            raise forms.ValidationError(f"{net} is not in zone {to}: its subnets are {', '.join(map(str, zone_space(m, to))) or 'none'}.")
+        if proto == "icmp":
+            if port: raise forms.ValidationError("ICMP has no port: leave it empty.")
+            port = None
+        else:
+            if not _ports(port): raise forms.ValidationError("TCP and UDP need a port (1-65535) or a range (low-high).")
+        dest = str(net.network_address) if net.prefixlen == 32 else str(net)
+        if hit := next((r for r in m.get("fw_policy", []) if covers(r, frm, to, proto, dest, port)), None):
+            raise forms.ValidationError(f"Already allowed by {hit['from']} → {hit['to']} {hit['dest']} {hit['proto']}{' ' + str(hit['port']) if hit.get('port') else ''}"
+                                        + (" (a Standard Firewall Rule)" if hit.get("standard") else "") + ".")
+        if _open("fw-rule", source=frm, target=to, proto=proto, dest=dest, port=port).exists():
+            raise forms.ValidationError("An open request already adds this rule.")
+        c.update(dest=dest, port=port)
+        return c
+
+    def params(self):
+        p = super().params(); p["port_label"] = f"port {p['port']}" if p.get("port") else ""; return p
+
+
+class FwRuleRemoveForm(RequestForm):
+    """Remove a custom rule a request added. The lab's own rules (lab.conf) and the Standard Firewall Rules (they come
+    and go with their VLAN) are not removable here."""
+    field_order = ["rule", "confirm", "reason"]
+    rule = forms.ChoiceField(label="Rule", help_text="Custom rules added through Fabric Factory.")
+    confirm = forms.BooleanField(label="I understand: connections it allows stop being accepted (established ones are kept until they end)", required=True)
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.fields["rule"].choices = [(f"{r['from']}|{r['to']}|{r['rule']}", rule_label(r)) for r in removable_rules(_model())]
+
+    def clean_rule(self):
+        frm, to, num = self.cleaned_data["rule"].split("|")
+        r = next((x for x in removable_rules(_model()) if x["from"] == frm and x["to"] == to and str(x["rule"]) == num), None)
+        if r is None: raise forms.ValidationError("That rule is no longer in the policy.")
+        if _open("fw-rule-remove", source=frm, target=to, rule=int(num)).exists(): raise forms.ValidationError("An open request already removes it.")
+        return r
+
+    def params(self):
+        r = self.cleaned_data["rule"]
+        return {"source": r["from"], "target": r["to"], "proto": r["proto"], "dest": r["dest"], "port": r.get("port"), "rule": r["rule"],
+                "port_label": f"port {r['port']}" if r.get("port") else "", "added_by": r.get("request")}
+
+
+def removable_rules(m):
+    return [r for r in m.get("fw_policy", []) if r.get("rule") and not r.get("standard") and not r.get("follows")]
+
+
+def rule_label(r):
+    return (f"{r['from']} → {r['to']} {r['dest']} {r['proto']}{' ' + str(r['port']) if r.get('port') else ''} — rule {r['rule']}"
+            + (f", request #{r['request']}" if r.get("request") else ""))
+
+
+# ---- move a server to another VLAN --------------------------------------------------------------------------------------------
+MOVABLE = ("web", "app")
+NOT_MOVABLE = {"db": "database servers keep their replication peers' addresses: not automated yet",
+               "lb": "load balancers hang off the border leaves and carry the web VIP: not automated"}
+
+
+class MoveServerForm(RequestForm):
+    """Move a web or app server to another VLAN of its own VRF (on the leaves). It keeps its host number in the new
+    subnet (web1, .11, in 172.16.6.0/24 becomes 172.16.6.11). Its tier keeps serving: the other server carries the
+    traffic while it moves."""
+    field_order = ["server", "vlan", "reason"]
+    server = forms.ChoiceField(label="Server", help_text="Web and app servers can move; the list says why others cannot.")
+    vlan = forms.ChoiceField(label="To VLAN", help_text="A VLAN of the server's VRF that is on the leaves.")
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        m = _model()
+        self.fields["server"].choices = [(h["name"], f"{h['name']} — VRF {h['vrf']}, VLAN {h['vlan']}, {h['address']}"
+                                          + (f" — cannot move: {NOT_MOVABLE[h['role']]}" if h["role"] in NOT_MOVABLE else ""))
+                                         for h in m.get("hosts", [])]
+        self.fields["vlan"].choices = [(str(v["vlan"]), f"{v['vlan']} {v['name'] or ''} — VRF {v['vrf']}, {v['subnet']}")
+                                       for v in m.get("vlans", []) if "leaves" in v["on"]]
+
+    def clean(self):
+        c = super().clean()
+        if "server" not in c or "vlan" not in c: return c
+        m = _model(); h = next(x for x in m["hosts"] if x["name"] == c["server"]); vid = int(c["vlan"])
+        v = next(x for x in m["vlans"] if x["vlan"] == vid)
+        if h["role"] in NOT_MOVABLE: raise forms.ValidationError(f"{h['name']}: {NOT_MOVABLE[h['role']]}.")
+        if vid == h["vlan"]: raise forms.ValidationError(f"{h['name']} is already in VLAN {vid}.")
+        if v["vrf"] != h["vrf"]: raise forms.ValidationError(f"VLAN {vid} is in VRF {v['vrf']}; {h['name']} is in VRF {h['vrf']}. A server moves within its VRF (its tier's zone).")
+        if len(h.get("vlans") or []) > 1: raise forms.ValidationError(f"{h['name']} is in the middle of a move (its bond carries VLANs {h['vlans']}).")
+        net = ipaddress.ip_network(v["subnet"]); addr = net.network_address + int(h["hostnum"])
+        if addr not in net or addr in (net.network_address, net.broadcast_address, ipaddress.ip_interface(v["gateway"]).ip):
+            raise forms.ValidationError(f"Host number {h['hostnum']} does not fit {net}.")
+        used = {ipaddress.ip_interface(x["address"]).ip for x in m["hosts"] if x.get("address")}
+        if addr in used: raise forms.ValidationError(f"{addr} is taken by another VM.")
+        if _open("move-server").exists(): raise forms.ValidationError("Another server move is open: one at a time.")
+        c.update(vlan=vid, _host=h, _vlan=v, _addr=f"{addr}/{net.prefixlen}")
+        return c
+
+    def params(self):
+        c = self.cleaned_data; h, v = c["_host"], c["_vlan"]
+        return {"server": h["name"], "role": h["role"], "vrf": h["vrf"], "hostnum": h["hostnum"],
+                "from_vlan": h["vlan"], "from_address": h["address"], "to_vlan": v["vlan"], "to_name": v["name"],
+                "to_subnet": v["subnet"], "to_address": c["_addr"], "to_gateway": v["gateway"]}

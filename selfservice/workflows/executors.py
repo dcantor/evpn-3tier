@@ -44,6 +44,15 @@ def _check(cond, msg):
     if not cond: raise RuntimeError(msg)
 
 
+def _lab():
+    """(inventory, ssh): the lab model from Nautobot — the live plan, with self-service VLANs and moved servers; lab.conf
+    does not know them — and tools/labssh.py's SSH runner."""
+    sys.path.insert(0, str(settings.LAB_DIR / "tools"))
+    import labssh                                                             # noqa: E402
+    from .clients import NAUTOBOT_URL, _nms
+    return labssh.nautobot_model(NAUTOBOT_URL, _nms("NAUTOBOT_SUPERUSER_API_TOKEN")), labssh.run
+
+
 def _fw_and_wan(inv, ssh, vid, net, present, log):
     """Both firewalls have (or no longer have) the subnet in PUBLIC, and the WAN learns (or no longer has) its route —
     the latter given BGP up to a minute to converge."""
@@ -201,9 +210,7 @@ def add_vlan(r, log):
     log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid}, the standard ICMP rules {fwrules.rule_number(vid)}): {furl}")
     # ---- 5 on the devices ----------------------------------------------------------------------------------------------------
     log.stage("checks")
-    sys.path.insert(0, str(settings.LAB_DIR / "tools"))
-    from labssh import inventory, run as ssh                                  # noqa: E402
-    inv = inventory()
+    inv, ssh = _lab()
     switches = [n["name"] for n in inv["nodes"] if (n["role"] == "leaf" and "leaves" in span) or (n["role"] == "border" and "borders" in span)]
     bad = []
     for s in switches:
@@ -303,10 +310,8 @@ def lb_peering(r, log):
     log(f"phpIPAM: VLAN {vlan}, the peering subnet {net} with {', '.join(sw)} and {lb}, the VIP prefixes")
     # ---- 5 checks ----------------------------------------------------------------------------------------------------------
     log.stage("checks")
-    sys.path.insert(0, str(settings.LAB_DIR / "tools"))
-    from labssh import inventory, run as ssh                                  # noqa: E402
     import time as _t
-    inv = inventory(); lb_ip = str(net.broadcast_address - 1)
+    inv, ssh = _lab(); lb_ip = str(net.broadcast_address - 1)
     deadline, down = _t.time() + 120, sw
     while down and _t.time() < deadline:
         down = []
@@ -383,9 +388,7 @@ def remove_vlan(r, log):
     log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid} deleted): {furl}")
     # ---- 4 checks: no trace on any switch ------------------------------------------------------------------------------------
     log.stage("checks")
-    sys.path.insert(0, str(settings.LAB_DIR / "tools"))
-    from labssh import inventory, run as ssh                                  # noqa: E402
-    inv = inventory()
+    inv, ssh = _lab()
     switches = [n["name"] for n in inv["nodes"] if n["role"] in ("leaf", "border", "spine")]
     pats = [rf"vlan-to-vni {vid} ", rf"\bpeth{vid}\b", rf"allowed-vlan {vid}$", rf"\bvni {vni}\b", rf"FABRIC-SUBNETS rule {vid} ", rf"\bvif {vid}\b",
             rf"\b{_re.escape(str(net))}\b"]
@@ -414,3 +417,6 @@ def remove_vlan(r, log):
 
 
 EXECUTORS = {"remove-vlan": remove_vlan, "add-vlan": add_vlan, "lb-peering": lb_peering}
+from . import changes as _changes                                           # noqa: E402  (changes.py imports this module's helpers)
+EXECUTORS.update({"vlan-span": _changes.vlan_span, "fw-rule": _changes.fw_rule, "fw-rule-remove": _changes.fw_rule_remove,
+                  "move-server": _changes.move_server})

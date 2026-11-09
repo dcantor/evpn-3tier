@@ -85,14 +85,14 @@ class Gitea:
                    for t in self.runs(repo, 20) if t["status"] == "success" and t.get("run_started_at"))
         return int(d[len(d) // 2]) if d else None
 
-    def dispatch_and_wait(self, repo, log, timeout=3600):
+    def dispatch_and_wait(self, repo, log, timeout=3600, verify=True):
         """Start the repo's deploy workflow on main and wait for it; returns (success, run number, url).
         While it runs, its job log is followed live (Gitea's web UI endpoint — there is no API for running jobs' logs)
         and parsed into `log`'s progress snapshot: steps, Ansible plays / tasks, per-host results, verify's checks."""
         from .progress import PipelineLog
         snap = log.pipeline(repo, status="queued", eta_s=self._safe(self.eta, repo))
         before = max((t["run_number"] for t in self.runs(repo, 5)), default=0)
-        r = requests.post(f"{GITEA_URL}/api/v1/repos/lab/{repo}/actions/workflows/deploy.yml/dispatches", json={"ref": "main"}, auth=self.auth, timeout=30)
+        r = requests.post(f"{GITEA_URL}/api/v1/repos/lab/{repo}/actions/workflows/deploy.yml/dispatches", json={"ref": "main", "inputs": {"verify": "true" if verify else "false"}}, auth=self.auth, timeout=30)
         if r.status_code != 204: raise RuntimeError(f"Gitea dispatch {repo}: {r.status_code} {r.text[:200]}")
         t0, run, web, cursors, last_poll = time.time(), None, None, {}, 0.0
         while time.time() - t0 < timeout:

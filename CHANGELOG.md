@@ -2,6 +2,37 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.21.0] - 2026-11-09
+
+### Added
+- Fabric Factory: four change workflows (approved by an operator, carried out by the worker, every stage idempotent):
+  - **Change a VLAN's span** (leaves, or leaves + borders): Nautobot -> switches pipeline (managed deletions) -> the
+    VLAN on exactly the new span -> ping from the WAN -> phpIPAM gateway description. Refused while something attached
+    to the borders uses the VLAN.
+  - **Add a custom firewall rule** (from zone, to zone, TCP / UDP / ICMP, address or subnet, port or range): validated
+    against the zone's address space and the existing policy (no duplicates, nothing already allowed); its own rule
+    number (500-899) so no other rule is renumbered; firewalls pipeline; checked on both firewalls; a live TCP connection
+    or ping from the source zone to a VM at the destination.
+  - **Remove a custom firewall rule** (self-service ones only).
+  - **Move a server to another VLAN** (web and app servers, within their VRF, keeping their host number): phpIPAM
+    reserves -> both VLANs on the bond (switches) -> custom rules that reach the old address get a twin for the new one
+    (firewalls) -> the address moves (servers; load balancers for a web server; verify skipped mid-move) -> old VLAN and
+    old twins off (switches / firewalls, full verify) -> checks, ping -> phpIPAM releases the old address. The tier keeps
+    serving throughout. Database servers and load balancers are refused (replication peers; the VIP).
+- Pipelines (all four Gitea repos): verify runs on the model rendered from Nautobot (not lab.conf); workflow_dispatch
+  input `verify` (false only for the middle runs of a multi-pipeline change); one inventory script in all four repos
+  (a server's bond carries every bond0.<VLAN> Nautobot lists); custom rules keep their own number; pg_hba allows every
+  app server's subnet and every db server's for replication.
+- `tools/labssh.py`: `E3T_MODEL=<file>|nautobot` makes the lab's tools (verify) use Nautobot's model;
+  `tools/nautobot_inventory.py` (the pipelines' model builder). verify handles port ranges in custom rules.
+- The worker's device checks read the lab from Nautobot. PyYAML added to the app's requirements.
+
+### Tested live
+- Requests #20-#27: VLAN 47 to the borders and back; web -> db tcp 6432 rule added (a real connection through the
+  firewall) and removed; web2 moved to VLAN 47 and back; app1 moved to VLAN 42 (its web -> app rule followed it) and
+  back. ~11 minutes per move, every final verify passed, phpIPAM <-> Nautobot 116/116 afterwards.
+- Found and fixed: moving back created a needless twin rule (the subnet rule already covered the address).
+
 ## [0.20.1] - 2026-11-09
 
 ### Changed

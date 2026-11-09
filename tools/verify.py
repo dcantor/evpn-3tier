@@ -136,7 +136,13 @@ def ip_of(n):
 
 
 # ---- the firewall policy ---------------------------------------------------------------------------------------------
-PORTS = sorted({int(p["port"]) for p in inv.get("fw_policy", []) if p["proto"] == "tcp" and p["port"]} | {9999})
+def port_range(p):
+    """'443' -> (443, 443); '9000-9010' -> (9000, 9010) (custom rules added through Fabric Factory may be ranges)."""
+    lo, _, hi = str(p).partition("-")
+    return int(lo), int(hi or lo)
+
+
+PORTS = sorted({port_range(p["port"])[0] for p in inv.get("fw_policy", []) if p["proto"] == "tcp" and p["port"]} | {9999})
 LISTEN = ("python3 -c \"import socket,threading,time\n"
           "def l(p):\n s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n"
           " try: s.bind(('0.0.0.0',p));s.listen(64)\n except OSError: return\n"
@@ -152,7 +158,8 @@ CONNECT = ("python3 -c \"import socket,sys\n"
 def allowed(src_vrf, dst_vrf, dst_ip, port):
     if src_vrf == dst_vrf: return True
     for p in inv.get("fw_policy", []):
-        if (p["from"], p["to"], p["proto"]) == (src_vrf, dst_vrf, "tcp") and str(port) == p["port"] \
+        if (p["from"], p["to"], p["proto"]) == (src_vrf, dst_vrf, "tcp") and p["port"] \
+                and port_range(p["port"])[0] <= int(port) <= port_range(p["port"])[1] \
                 and ipaddress.ip_address(dst_ip) in ipaddress.ip_network(p["dest"], strict=False):
             return True
     return False

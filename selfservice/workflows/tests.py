@@ -608,3 +608,80 @@ class ReconcileTests(TestCase):
 
     def test_api_requires_login(self):
         self.assertEqual(self.client.get("/api/fabric/reconcile").status_code, 401)
+
+
+# ---- the change workflows' forms ---------------------------------------------------------------------------------------------
+def _vl(vid, name, vrf, subnet, on):
+    gw = str(ipaddress.ip_network(subnet).network_address + 1)
+    return {"vlan": vid, "name": name, "vrf": vrf, "vni": 10000 + vid, "gateway": f"{gw}/24", "subnet": subnet, "on": on, "blocked": None}
+
+
+LAB2 = {**LAB,
+        "vlans": [_vl(10, "vlan_10_web", "web", "172.16.10.0/24", ["leaves", "borders"]), _vl(20, "vlan_20_app", "app", "172.16.20.0/24", ["leaves"]),
+                  _vl(30, "vlan_30_db", "db", "172.16.30.0/24", ["leaves"]), _vl(42, "vlan_42_app", "app", "172.16.1.0/24", ["leaves"]),
+                  _vl(47, "vlan_47_web", "web", "172.16.6.0/24", ["leaves"])],
+        "hosts": [{"name": "lb1", "role": "lb", "vrf": "web", "vlan": 10, "vlans": [10], "address": "172.16.10.5/24", "hostnum": 5, "peers": ["border1", "border2"]},
+                  {"name": "web1", "role": "web", "vrf": "web", "vlan": 10, "vlans": [10], "address": "172.16.10.11/24", "hostnum": 11, "peers": ["leaf1", "leaf2"]},
+                  {"name": "app1", "role": "app", "vrf": "app", "vlan": 20, "vlans": [20], "address": "172.16.20.11/24", "hostnum": 11, "peers": ["leaf1", "leaf2"]},
+                  {"name": "db1", "role": "db", "vrf": "db", "vlan": 30, "vlans": [30], "address": "172.16.30.11/24", "hostnum": 11, "peers": ["leaf1", "leaf2"]}],
+        "fw_policy": [{"from": "outside", "to": "web", "dest": "172.16.10.10", "proto": "tcp", "port": "443"},
+                      {"from": "web", "to": "app", "dest": "172.16.20.0/24", "proto": "tcp", "port": "8080"},
+                      {"from": "app", "to": "db", "dest": "172.16.30.0/24", "proto": "tcp", "port": "5432"},
+                      {"from": "outside", "to": "app", "dest": "172.16.20.0/24", "proto": "icmp", "port": None, "standard": True, "vlan": 20},
+                      {"from": "web", "to": "db", "dest": "172.16.30.11", "proto": "tcp", "port": "9000-9010", "rule": 500, "request": 21}],
+        "web_vip": "172.16.10.10"}
+patched2 = mock.patch("workflows.labmodel.model", return_value=LAB2)
+
+
+@patched2
+class ChangeFormTests(TestCase):
+    def test_span(self, _m):
+        f = F.VlanSpanForm({"vlan": "47", "span": "leaves+borders", "reason": "r"}); self.assertTrue(f.is_valid(), f.errors)
+        p = f.params(); self.assertEqual((p["span_from"], p["span_to"]), ("leaves", "leaves+borders"))
+        self.assertFalse(F.VlanSpanForm({"vlan": "47", "span": "leaves", "reason": "r"}).is_valid())          # no change
+        f = F.VlanSpanForm({"vlan": "10", "span": "leaves", "reason": "r"}); self.assertFalse(f.is_valid())  # lb1 uses it on the borders
+        self.assertIn("lb1", str(f.errors))
+
+    def test_fw_rule_valid_and_normalised(self, _m):
+        f = F.FwRuleForm({"source": "web", "target": "db", "proto": "tcp", "dest": "172.16.30.12/32", "port": "6432", "reason": "r"})
+        self.assertTrue(f.is_valid(), f.errors); p = f.params()
+        self.assertEqual((p["dest"], p["port"], p["port_label"]), ("172.16.30.12", "6432", "port 6432"))
+
+    def test_fw_rule_refusals(self, _m):
+        bad = [({"source": "web", "target": "web", "proto": "tcp", "dest": "172.16.10.11", "port": "80"}, "same zone"),
+               ({"source": "web", "target": "db", "proto": "tcp", "dest": "172.16.20.11", "port": "80"}, "not in zone db"),
+               ({"source": "web", "target": "app", "proto": "tcp", "dest": "172.16.20.11", "port": "8080"}, "Already allowed"),
+               ({"source": "web", "target": "db", "proto": "tcp", "dest": "172.16.30.11", "port": "9005"}, "Already allowed"),   # inside a range
+               ({"source": "outside", "target": "app", "proto": "icmp", "dest": "172.16.20.11", "port": ""}, "Standard Firewall Rule"),
+               ({"source": "web", "target": "db", "proto": "icmp", "dest": "172.16.30.11", "port": "7"}, "no port"),
+               ({"source": "web", "target": "db", "proto": "tcp", "dest": "172.16.30.11", "port": ""}, "need a port"),
+               ({"source": "app", "target": "outside", "proto": "tcp", "dest": "172.16.0.0/16", "port": "443"}, "inside the lab"),
+               ({"source": "app", "target": "outside", "proto": "tcp", "dest": "0.0.0.0/0", "port": "443"}, "/8 or longer")]
+        for data, why in bad:
+            f = F.FwRuleForm({**data, "reason": "r"}); self.assertFalse(f.is_valid(), data); self.assertIn(why, str(f.errors), data)
+
+    def test_fw_rule_remove_lists_only_self_service_rules(self, _m):
+        f = F.FwRuleRemoveForm()
+        self.assertEqual([c for c, _ in f.fields["rule"].choices], ["web|db|500"])
+        f = F.FwRuleRemoveForm({"rule": "web|db|500", "confirm": "on", "reason": "r"}); self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual((f.params()["rule"], f.params()["added_by"]), (500, 21))
+
+    def test_move_server(self, _m):
+        f = F.MoveServerForm({"server": "web1", "vlan": "47", "reason": "r"}); self.assertTrue(f.is_valid(), f.errors)
+        p = f.params(); self.assertEqual((p["from_vlan"], p["to_vlan"], p["to_address"]), (10, 47, "172.16.6.11/24"))
+        for data, why in [({"server": "web1", "vlan": "42"}, "within its VRF"), ({"server": "web1", "vlan": "10"}, "already in VLAN"),
+                          ({"server": "db1", "vlan": "30"}, "database servers"), ({"server": "lb1", "vlan": "47"}, "load balancers")]:
+            f = F.MoveServerForm({**data, "reason": "r"}); self.assertFalse(f.is_valid(), data); self.assertIn(why, str(f.errors), data)
+
+
+class TwinRuleTests(TestCase):
+    def test_rules_follow_a_moved_server(self):
+        from .changes import _twins
+        pol = LAB2["fw_policy"]
+        tw = _twins(pol, "app1", "172.16.20.11", "172.16.1.11")
+        self.assertEqual([(t["from"], t["to"], t["dest"], t["port"], t["follows"]) for _, t in tw], [("web", "app", "172.16.1.11", "8080", "app1")])
+        self.assertEqual(_twins(pol, "app1", "172.16.20.11", "172.16.20.99"), [])     # the same subnet: already covered
+        done = pol + [{**tw[0][1], "rule": 500}]
+        self.assertEqual(_twins(done, "app1", "172.16.20.11", "172.16.1.11"), [])      # a retry adds no second twin
+        back = pol + [{**tw[0][1], "rule": 500}]                                         # moving back: the subnet rule covers it again
+        self.assertEqual(_twins(back, "app1", "172.16.1.11", "172.16.20.11"), [])

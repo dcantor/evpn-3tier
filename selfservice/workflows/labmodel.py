@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 QUERY = """{ config_contexts(name: ["evpn-3tier"]) { data }
   devices(location: ["evpn-3tier"]) { name local_config_context_data role { name } rack { name }
-    interfaces { name vrf { name } cable_peer_interface { device { name } } } }
+    interfaces { name vrf { name } ip_addresses { address } cable_peer_interface { device { name } } } }
   vlans(vlan_group: ["evpn-3tier"]) { vid name } }"""
 
 
@@ -36,7 +36,11 @@ def _from_nautobot():
                       # a Linux VM: the switches its bond legs are cabled to, and its tier VRF (bond0.<VLAN>)
                       "peers": sorted({strip(i["cable_peer_interface"]["device"]["name"]) for i in ifs if i["name"] in ("eth1", "eth2") and i.get("cable_peer_interface")}),
                       "vrf": next((i["vrf"]["name"] for i in ifs if i["name"].startswith("bond0.") and i.get("vrf")), None),
-                      "vlans": sorted(int(i["name"].split(".")[1]) for i in ifs if re.match(r"^bond0\.\d+$", i["name"]))})
+                      "vlans": sorted(int(i["name"].split(".")[1]) for i in ifs if re.match(r"^bond0\.\d+$", i["name"])),
+                      # the tier address (the bond0.<VLAN> with an address) and the host number it is made from
+                      **next(({"vlan": int(i["name"].split(".")[1]), "address": i["ip_addresses"][0]["address"]} for i in ifs
+                              if re.match(r"^bond0\.\d+$", i["name"]) and i.get("ip_addresses")), {}),
+                      "hostnum": x["local_config_context_data"].get("hostnum")})
     ctx = {**ctx, "_vlan_names": {v["vid"]: v["name"] for v in d.get("vlans") or []}}
     return ctx, ev, nodes, "Nautobot"
 
@@ -47,6 +51,7 @@ def _from_lab():
         n["peers"] = sorted({p["peer"] for p in n["ports"] if p.get("kind") == "access"}) if n.get("net") else []
         n["vrf"] = (n.get("net") or {}).get("vrf")
         n["vlans"] = [n["net"]["vlan"]] if n.get("net") else []
+        if n.get("net"): n.update(vlan=n["net"]["vlan"], address=n["net"]["address"], hostnum=n["net"].get("hostnum"))
     return {**inv, "evpn": inv["evpn"]}, inv["evpn"], inv["nodes"], "lab.conf (Nautobot did not answer)"
 
 
@@ -92,6 +97,10 @@ def model():
         "lbs": lbs, "lb_peerings": peerings,
         "switch_pairs": pairs,
         "tier_vlans": [{"vlan": v["vlan"], "vrf": v["vrf"], "gateway": v["gateway"], "on": "+".join(v["on"])} for v in ev["vlans"]],
+        # the VMs on the fabric: role, VRF, tier VLAN and address, every VLAN their bond carries, the switches they hang off
+        "hosts": [{k: n.get(k) for k in ("name", "role", "vrf", "vlan", "vlans", "address", "hostnum", "peers")}
+                  for n in sorted(nodes, key=lambda n: n["idx"]) if n["role"] in ("lb", "web", "app", "db")],
+        "fw_policy": ctx.get("fw_policy", []), "web_vip": ctx.get("web_vip"),
     }
     _cache.update(t=time.time(), v=m)
     return m
