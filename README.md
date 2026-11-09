@@ -152,13 +152,18 @@ worker (manage.py e3t_worker): Nautobot -> Gitea pipelines (log followed live) -
   The WAN gets the fabric's subnets that reach VRF outside (today 172.16.10.0/24, the web tier) and nothing else — no
   loopbacks, transit, /31s or /32s, nor the default route back. *Add a VLAN* puts its subnet in the list (the switches
   pipeline) and checks both borders carry it.
+- **What the WAN learns**: the firewalls export to outside through route-map `TO-OUTSIDE` -> prefix-list **`PUBLIC`**,
+  which lists **every tier VLAN subnet** (web, app, db; rule number = VLAN ID), so the WAN learns routes to all of them.
+  Routes only: the zone-based firewall still drops every flow outside may not start — from the WAN only the web VIP
+  (HTTPS) and the order API pass; app and db stay unreachable (verify's policy matrix: 35 flows from outside, 2 allowed).
+  Add / Remove a VLAN run the firewalls pipeline too and check both firewalls and the WAN.
 - **Add a VLAN, executed** (workflows/executors.py, every step idempotent) — **phpIPAM is the source of truth for
   addressing, so it goes first**: 1 phpIPAM — reserve the VLAN, the subnet (its VRF and VLAN) and the gateway (first
   host); every check runs before the first write, so a VLAN or subnet taken since the request was submitted refuses
   the request with nothing changed (a retry recognises its own reservation by the request number); 2 Nautobot — from
   phpIPAM's reservation, read back: the VLAN in the evpn-3tier plan (config context), the native VLAN and its prefix in
-  the VRF; 3 Gitea — the evpn-3tier-switches pipeline (inventory from Nautobot, check, apply, verify), waited for, its
-  run linked; 4 checks — every switch in the span carries VLAN -> VNI and the anycast gateway, both borders permit the
+  the VRF; 3 Gitea — the evpn-3tier-switches pipeline (inventory from Nautobot, check, apply, verify), then
+  evpn-3tier-firewalls (the subnet into PUBLIC), each waited for and linked; 4 checks — every switch in the span carries VLAN -> VNI and the anycast gateway, both borders permit the
   subnet to the WAN. Proven: request #9, VLAN 44 (vlan_44_db, 172.16.3.0/24).
 - **Load balancer peering, executed**: 1 Nautobot — the peering in the plan (config context `lb_peerings`), the peering
   VLAN and the prefixes; 2 the evpn-3tier-switches pipeline — on the switch pair, `br0.<VLAN>` (.1/.2) in the VRF and an

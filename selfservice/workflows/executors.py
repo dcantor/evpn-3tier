@@ -6,7 +6,8 @@ add-vlan       (phpIPAM is the source of truth for addressing: it is written fir
                (its first host) — refused, with nothing changed, if any of it was taken since the request was submitted
   2 Nautobot   from phpIPAM's reservation (read back): the VLAN in the evpn-3tier plan (config context: VLAN, VRF, VNI,
                gateway, span) — what the pipelines render from — plus the native VLAN and its prefix (in the VRF)
-  3 Gitea      the evpn-3tier-switches pipeline: inventory from Nautobot, check, apply to the leaves / borders, verify
+  3 Gitea      the evpn-3tier-switches pipeline: inventory from Nautobot, check, apply to the leaves / borders, verify;
+               then evpn-3tier-firewalls: the subnet into PUBLIC (what outside, and so the WAN, learns)
   4 checks     every switch in the span carries the VLAN (vlan-to-vni) and its anycast gateway; both borders permit the
                subnet to the WAN (prefix-list FABRIC-SUBNETS, called by route-map TO-WAN on the eBGP sessions to the WAN)
 remove-vlan    (the mirror of add-vlan; phpIPAM last: addresses are released only once nothing uses them)
@@ -24,6 +25,7 @@ lb-peering
                HTTP (/health) from a server in the VRF"""
 import ipaddress
 import json
+import re
 import sys
 
 from django.conf import settings
@@ -38,6 +40,29 @@ class NotAutomated(Exception):
 
 def _check(cond, msg):
     if not cond: raise RuntimeError(msg)
+
+
+def _fw_and_wan(inv, ssh, vid, net, present, log):
+    """Both firewalls have (or no longer have) the subnet in PUBLIC, and the WAN learns (or no longer has) its route —
+    the latter given BGP up to a minute to converge."""
+    import time as _t
+    fws = [n["name"] for n in inv["nodes"] if n["role"] == "fw"]
+    bad = []
+    for fw in fws:
+        _, out = ssh(fw, "/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration commands | grep -E 'prefix-list PUBLIC rule'", inv=inv, timeout=120)
+        has = f"prefix-list PUBLIC rule {vid} prefix {net}" in out.replace("'", "")
+        if has != present: bad.append(fw)
+    _check(not bad, f"PUBLIC on {', '.join(bad)}: {net} {'missing' if present else 'still there'}")
+    wan = next(n["name"] for n in inv["nodes"] if n["role"] == "wan")
+    deadline, seen = _t.time() + 60, None
+    while _t.time() < deadline:
+        _, out = ssh(wan, f"vtysh -c 'show ip route {net} longer-prefixes'", inv=inv, timeout=60)
+        seen = bool(re.search(rf"^B\S*\s+{re.escape(str(net))}\s", out, re.M))     # a BGP route line for exactly the subnet
+        if seen == present: break
+        _t.sleep(10)
+    _check(seen == present, f"the WAN {'has not learned' if present else 'still has'} {net}")
+    log(f"routes to outside: {', '.join(fws)} {'export' if present else 'no longer export'} {net} (prefix-list PUBLIC rule {vid}); "
+        f"the WAN {'learns' if present else 'no longer has'} it — traffic stays subject to the firewall zone policy")
 
 
 def add_vlan(r, log):
@@ -113,7 +138,12 @@ def add_vlan(r, log):
     ok, num, url = Gitea().dispatch_and_wait("evpn-3tier-switches", log)
     _check(ok, f"evpn-3tier-switches run #{num} failed — {url}")
     log(f"evpn-3tier-switches run #{num} succeeded (inventory committed, checked, applied, verified): {url}")
-    # ---- 4 on the devices ----------------------------------------------------------------------------------------------------
+    # ---- 4 the firewalls pipeline: the subnet in PUBLIC (what outside, and so the WAN, learns) -------------------------------
+    log.stage("firewalls")
+    fok, fnum, furl = Gitea().dispatch_and_wait("evpn-3tier-firewalls", log)
+    _check(fok, f"evpn-3tier-firewalls run #{fnum} failed — {furl}")
+    log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid}): {furl}")
+    # ---- 5 on the devices ----------------------------------------------------------------------------------------------------
     log.stage("checks")
     sys.path.insert(0, str(settings.LAB_DIR / "tools"))
     from labssh import inventory, run as ssh                                  # noqa: E402
@@ -140,7 +170,8 @@ def add_vlan(r, log):
         if missing := [w for w in want if w not in out]: bad.append(f"{b} ({'; '.join(missing)})")
     _check(not bad, f"the WAN export policy lacks {net} on: {', '.join(bad)}")
     log(f"WAN export policy: {', '.join(borders)} permit {net} to the WAN (prefix-list FABRIC-SUBNETS rule {vid}, route-map TO-WAN on the eBGP sessions to the WAN)")
-    return {"switches_run": num, "switches_run_url": url, "switches": switches}
+    _fw_and_wan(inv, ssh, vid, net, present=True, log=log)
+    return {"switches_run": num, "switches_run_url": url, "firewalls_run": fnum, "firewalls_run_url": furl, "switches": switches}
 
 
 def lb_peering(r, log):
@@ -281,6 +312,10 @@ def remove_vlan(r, log):
     ok, num, url = Gitea().dispatch_and_wait("evpn-3tier-switches", log)
     _check(ok, f"evpn-3tier-switches run #{num} failed — {url}")
     log(f"evpn-3tier-switches run #{num} succeeded (the VLAN's lines deleted by its managed deletions, verified): {url}")
+    log.stage("firewalls")
+    fok, fnum, furl = Gitea().dispatch_and_wait("evpn-3tier-firewalls", log)
+    _check(fok, f"evpn-3tier-firewalls run #{fnum} failed — {furl}")
+    log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid} deleted): {furl}")
     # ---- 4 checks: no trace on any switch ------------------------------------------------------------------------------------
     log.stage("checks")
     sys.path.insert(0, str(settings.LAB_DIR / "tools"))
@@ -296,6 +331,7 @@ def remove_vlan(r, log):
         if hits: left[sw] = hits
     _check(not left, "still on the switches: " + "; ".join(f"{k}: {v[0]}" + (f" (+{len(v) - 1})" if len(v) > 1 else "") for k, v in left.items()))
     log(f"on the devices: no trace of VLAN {vid} / VNI {vni} / {net} on {', '.join(switches)}")
+    _fw_and_wan(inv, ssh, vid, net, present=False, log=log)
     # ---- 5 phpIPAM last: release the addresses --------------------------------------------------------------------------------
     log.stage("phpipam")
     if sub is not None:
@@ -307,7 +343,8 @@ def remove_vlan(r, log):
     left_ipam = [x for x in ip.req("GET", f"subnets/cidr/{net.network_address}/{net.prefixlen}") or [] if x["sectionId"] == sec["id"]]
     _check(not left_ipam, f"phpIPAM still has {net}")
     log(f"done: VLAN {vid} is gone from the switches, Nautobot and phpIPAM — its ID and subnet are free again")
-    return {"switches_run": num, "switches_run_url": url, "removed": {"vlan": vid, "vni": vni, "subnet": str(net)}}
+    return {"switches_run": num, "switches_run_url": url, "firewalls_run": fnum, "firewalls_run_url": furl,
+            "removed": {"vlan": vid, "vni": vni, "subnet": str(net)}}
 
 
 EXECUTORS = {"remove-vlan": remove_vlan, "add-vlan": add_vlan, "lb-peering": lb_peering}

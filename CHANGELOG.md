@@ -2,6 +2,16 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.0] - 2026-11-09
+
+### Changed
+- Firewalls: prefix-list PUBLIC (what outside, and so the WAN, learns) lists every tier VLAN subnet — web, app, db; rule
+  number = VLAN ID — not only the first web VLAN. Routes only: the zone policy is unchanged (verify, full: 65/65; from
+  the WAN 35 flows, 2 allowed). Template and lab renderer; firewalls run #5. The WAN now learns 172.16.0-3.0/24,
+  172.16.10/20/30/40.0/24.
+- Add / Remove a VLAN run the firewalls pipeline after the switches and check both firewalls' PUBLIC and the WAN's
+  route (present / gone). Proven: requests #12 (VLAN 45 added) and #13 (removed).
+
 ## [0.16.0] - 2026-11-09
 
 ### Added

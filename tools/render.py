@@ -253,8 +253,6 @@ def firewall(inv, n):
     seg = next(s for s in ev["segments"] if s["node"] == me)
     legs = [p["name"] for p in n["ports"] if p.get("kind") == "access"]
     sync = next(p["name"] for p in n["ports"] if p.get("kind") == "sync")
-    web = next(v for v in ev["vlans"] if v["vrf"] == "web")
-    web_net = str(ipaddress.ip_interface(web["gateway"]).network)
     b = "set interfaces bonding bond0"
     out = [f"{b} mode 802.3ad", f"{b} lacp-rate fast", f"{b} hash-policy layer3+4",
            f"{b} description 'ES {seg['es']}: LACP to {', '.join(l['switch'] for l in seg['legs'])}'",
@@ -265,8 +263,13 @@ def firewall(inv, n):
            "set protocols bgp parameters bestpath as-path multipath-relax", "set protocols bgp parameters log-neighbor-changes",
            "set policy prefix-list DEFAULT-ONLY rule 10 action permit", "set policy prefix-list DEFAULT-ONLY rule 10 prefix 0.0.0.0/0",
            "set policy prefix-list DEFAULT-ONLY description 'what a tier VRF gets from the firewall: the default route'",
-           "set policy prefix-list PUBLIC rule 10 action permit", f"set policy prefix-list PUBLIC rule 10 prefix {web_net}",
-           "set policy prefix-list PUBLIC description 'what outside gets from the firewall: the web VLAN only'"]
+           # what outside (and so the WAN) learns: every tier VLAN subnet, one exact rule each, rule number = VLAN ID.
+           # Routes only: the zone policy still drops what outside may not start (outside -> app / db)
+           *[x for v in sorted(inv["evpn"]["vlans"], key=lambda v: v["vlan"]) for x in (
+               f"set policy prefix-list PUBLIC rule {v['vlan']} action permit",
+               f"set policy prefix-list PUBLIC rule {v['vlan']} description 'VLAN {v['vlan']} (VRF {v['vrf']})'",
+               f"set policy prefix-list PUBLIC rule {v['vlan']} prefix {ipaddress.ip_interface(v['gateway']).network}")],
+           "set policy prefix-list PUBLIC description 'what outside gets from the firewall: every tier VLAN subnet (routes; the zone policy filters traffic)'"]
     standby = n["fw_no"] > 1
     for name, pl in (("TO-TIER", "DEFAULT-ONLY"), ("TO-OUTSIDE", "PUBLIC")):
         rm = f"set policy route-map {name} rule 10"
