@@ -11,7 +11,8 @@ const SIZE = { platform: [1012, 624], topology: [1012, 662], evpn: [1012, 498], 
   "nb-interfaces": [2724, 1144], "nb-vlans": [2724, 1608],
   "asn-db": [2160, 2546], "vlan-db": [2160, 2566],
   "port-form": [2160, 2046], "port-request": [2122, 574],
-  "own-apps": [2160, 1590], "own-profiles": [2160, 646] };
+  "own-apps": [2160, 1590], "own-profiles": [2160, 646],
+  "lp-request": [2160, 612], "vrf-request": [2160, 612], "grow-dash": [2160, 748], "vrf-form": [2160, 1404] };
 const W = 13.333, L = 0.6, R = W - 0.6, CW = R - L; // margins
 const TOP = 1.75, BOT = 6.8;
 
@@ -589,6 +590,50 @@ const TOP = 1.75, BOT = 6.8;
       tb(s, x + 0.85, y + 0.1, w - 1.0, rh - 0.18, hd, b, { hs: 14, bs: 11.5, valign: "top" });
     }
     s.notes("Profiles live in Nautobot's plan (port_profiles); a port records its profile in a custom field. Applications are Nautobot tenants in their own group with an application ID, the owner team linked by a contact association with the role Owner, and each port linked to its application by a Nautobot relationship. Ownership is recorded, not enforced yet. Tested live: a profile created, a port put on it for APP-1042, the profile changed and re-applied, the port defaulted and the profile deleted.");
+  }
+
+  // 17f Add a leaf pair
+  {
+    const s = content("Automation and orchestration", "Add a leaf pair", "A new rack of two leaves, cabled, configured and verified on the running fabric — one request");
+    const a = diagram(s, "lp-request", L, TOP, 5.6, 1.6, "Request 59 done: Add leaf pair leaf5 + leaf6 (rack3), every stage complete in 13 minutes 48 seconds");
+    s.text("Request #59: about fourteen minutes", { x: a.x, y: a.y + a.h + 0.03, w: a.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const py = a.y + a.h + 0.35;
+    const pr = diagram(s, "grow-dash", L, py, 5.6, BOT - py - 0.28, "The Fabric Dashboard: 10 switches (2 spine, 6 leaf, 2 border), 5 VRFs");
+    s.text("The dashboard afterwards: six leaves", { x: pr.x, y: pr.y + pr.h + 0.03, w: pr.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const x = L + 5.6 + 0.4, w = R - x;
+    const rows = [["LuHash", C.accent1, "Everything allocated", "From the leaf number: AS, management and loopback addresses, rack, the spines' next spare ports. The requester only says why."],
+      ["LuCable", C.accent3, "Racked and cabled", "phpIPAM, Nautobot (rack, devices, cables), the VMs and day-0 over the serial console, then the switches pipeline and checks: BGP + BFD, VNIs, gateways."],
+      ["LuTrash2", C.accent4, "Remove a leaf pair", "The last pair added; refused while a server is cabled to it or one of its ports is provisioned."]];
+    const gap = 0.12, rh = (BOT - TOP - 2 * gap) / 3;
+    for (const [i, [g, c, hd, b]] of rows.entries()) {
+      const y = TOP + i * (rh + gap);
+      card(s, x, y, w, rh, c, 90);
+      await badge(s, x + 0.2, y + 0.22, 0.5, g, c);
+      tb(s, x + 0.85, y + 0.1, w - 1.0, rh - 0.18, hd, b, { hs: 14, bs: 11.5, valign: "top" });
+    }
+    s.notes("Hardware stays in lab.conf: an added pair is one line in added-leaves.conf, the rest derived from the leaf number. Configuration stays in Nautobot. The spines got four spare ports (eth7-eth10) once, one spine restarted at a time, so two pairs can be added. Tested live: added, a port provisioned, removal refused, the port defaulted, the pair removed.");
+  }
+
+  // 17g Add a VRF
+  {
+    const s = content("Automation and orchestration", "Add a VRF", "A new tier zone behind the firewalls: its VRF, a transit to both firewalls and a zone that denies by default");
+    const a = diagram(s, "vrf-request", L, TOP, 5.6, 1.6, "Request 60 done: Add VRF pay, every stage complete in 10 minutes 25 seconds");
+    s.text("Request #60: VRF pay with its first VLAN", { x: a.x, y: a.y + a.h + 0.03, w: a.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const py = a.y + a.h + 0.35;
+    const pr = diagram(s, "vrf-form", L, py, 5.6, BOT - py - 0.28, "The Add a VRF form: name pay, its first VLAN in the same request, on every leaf");
+    s.text("The form: a name and a reason", { x: pr.x, y: pr.y + pr.h + 0.03, w: pr.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const x = L + 5.6 + 0.4, w = R - x;
+    const rows = [["LuShieldCheck", C.accent1, "A security zone", "Like web, app and db: an L3VNI, a transit VLAN with eBGP to fw1 / fw2, zone PAY — deny by default, plus the standard ICMP rules."],
+      ["LuHash", C.accent3, "Allocated, up to 20", "Table, L3VNI, VLANs, a transit /28 from a phpIPAM pool, probe addresses; the first VLAN as Add a VLAN picks it."],
+      ["LuTrash2", C.accent4, "Delete a VRF", "Added VRFs only; refused while it holds a VLAN, a server, a peering or a custom rule."]];
+    const gap = 0.12, rh = (BOT - TOP - 2 * gap) / 3;
+    for (const [i, [g, c, hd, b]] of rows.entries()) {
+      const y = TOP + i * (rh + gap);
+      card(s, x, y, w, rh, c, 90);
+      await badge(s, x + 0.2, y + 0.22, 0.5, g, c);
+      tb(s, x + 0.85, y + 0.1, w - 1.0, rh - 0.18, hd, b, { hs: 14, bs: 11.5, valign: "top" });
+    }
+    s.notes("The templates loop over Nautobot's plan, so a VRF is data plus two pipeline runs: switches first without verify, then firewalls with the whole lab verified. Standard Firewall Rules now take their zones from the plan. One extra zone added about 190 lines to each firewall; 20 zones is untested. Tested live: added with VLAN 48, delete refused, VLAN removed, VRF deleted.");
   }
 
   // 18 Sequence
