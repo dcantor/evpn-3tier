@@ -47,8 +47,16 @@ function Allocate({ f, values, alloc, setAlloc, onFill, error }: {
   );
 }
 
+function lookup(f: Field, values: Record<string, unknown>) {
+  for (const k of f.ui?.keys ?? []) {
+    const key = k.replace(/\{(\w+)\}/g, (_, n) => String(values[n] ?? ""));
+    if (f.ui?.map && key in f.ui.map) return f.ui.map[key];
+  }
+  return null;
+}
+
 function Computed({ f, values, alloc, error }: { f: Field; values: Record<string, unknown>; alloc: VlanAllocation | null; error?: string[] }) {
-  const v = f.ui?.template ? fill(f.ui.template, values) : (values[f.name] as string) || null;
+  const v = f.ui?.map ? lookup(f, values) : f.ui?.template ? fill(f.ui.template, values) : (values[f.name] as string) || null;
   return (
     <div className={`field ${error ? "has-err" : ""}`}>
       <label>{f.label}</label>
@@ -111,7 +119,7 @@ export default function NewRequest() {
   useEffect(() => {
     api.form(slug).then((s) => {
       setSpec(s);
-      setValues(Object.fromEntries(s.fields.filter((f) => f.type !== "computed" || !f.ui?.template)
+      setValues(Object.fromEntries(s.fields.filter((f) => f.type !== "computed" || !(f.ui?.template || f.ui?.map))
         .map((f) => {
           // a link may pre-fill the form (?name=web-access&trunk_vlans=41,47): known fields only
           const q = new URLSearchParams(window.location.search).get(f.name);
@@ -124,7 +132,7 @@ export default function NewRequest() {
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setBusy(true); setErrors({});
     try {
-      const computedNames = new Set(spec!.fields.filter((f) => f.type === "computed" && f.ui?.template).map((f) => f.name));
+      const computedNames = new Set(spec!.fields.filter((f) => f.type === "computed" && (f.ui?.template || f.ui?.map)).map((f) => f.name));
       const r = await api.create(slug, Object.fromEntries(Object.entries(values).filter(([k]) => !computedNames.has(k))));
       toast({ tone: "info", title: `Request #${r.id} submitted`, body: "An operator approves it next." });
       nav(`/requests/${r.id}`);
@@ -143,7 +151,7 @@ export default function NewRequest() {
         <Card>
           <form onSubmit={submit} className="form" noValidate>
             {errors.__all__ && <ErrorNote>{errors.__all__.join(" ")}</ErrorNote>}
-            {spec.fields.map((f) => f.type === "allocate"
+            {spec.fields.filter((f) => !f.ui?.when || values[f.ui.when.field] === f.ui.when.value).map((f) => f.type === "allocate"
               ? <Allocate key={f.name} f={f} values={values} alloc={alloc} setAlloc={setAlloc} error={errors[f.name]}
                           onFill={(v) => { setValues((s) => ({ ...s, ...v })); setErrors((e) => ({ ...e, [f.name]: [], ...Object.fromEntries(Object.keys(v).map((k) => [k, []])) })); }} />
               : f.type === "computed"

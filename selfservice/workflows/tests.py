@@ -22,12 +22,24 @@ LAB = {
     "lbs": {"lb1": {"pair": "border leaves", "switches": ["border1", "border2"], "vrf": "web", "peering": None},
             "lb2": {"pair": "border leaves", "switches": ["border1", "border2"], "vrf": "web", "peering": {"asn": 65320}}},
     "lb_peerings": [],
+    "vlans": [{"vlan": 10, "vrf": "web", "vni": 10010, "gateway": "172.16.10.1/24", "subnet": "172.16.10.0/24", "on": ["leaves", "borders"]},
+              {"vlan": 20, "vrf": "app", "vni": 10020, "gateway": "172.16.20.1/24", "subnet": "172.16.20.0/24", "on": ["leaves"]},
+              {"vlan": 30, "vrf": "db", "vni": 10030, "gateway": "172.16.30.1/24", "subnet": "172.16.30.0/24", "on": ["leaves"]}],
+    "hosts": [{"name": "lb1", "address": "172.16.10.5/24"}, {"name": "web1", "address": "172.16.10.11/24"}],
+    "web_vip": "172.16.10.10",
 }
 patched = mock.patch("workflows.labmodel.model", return_value=LAB)
 
 VLAN_OK = {"vlan_id": 40, "name": "app-backup", "vrf": "app", "gateway": "172.16.40.1/24", "span": "leaves", "reason": "backups"}
-LB_OK = {"device": "lb1", "asn": 65310, "peering_vlan": 150, "peering_subnet": "172.16.150.0/29",
-         "vip_prefixes": "172.16.200.0/28\n172.16.201.0/28", "bfd": "on", "reason": "a second load-balancer pair"}
+LB_OK = {"action": "add", "tier": "app", "reason": "a load balancer for the app tier"}
+# lbs.py reads the hardware inventory (added-lbs.conf), phpIPAM and the host's memory: fixed here
+lb_env = [mock.patch("workflows.lbs.added", return_value=[]), mock.patch("workflows.lbs.ipam_used", return_value=set()),
+          mock.patch("workflows.lbs.mem_available_mib", return_value=8000)]
+
+
+def with_lb_env(cls):
+    for m in lb_env: cls = m(cls)
+    return cls
 
 
 @patched
@@ -82,27 +94,72 @@ class AddVlanFormTests(TestCase):
 
 
 @patched
+@with_lb_env
 class LbPeeringFormTests(TestCase):
-    def test_valid(self, _m):
+    """Set up a load balancer pair: Add (the requester picks only the tier) or Delete (the last pair added)."""
+    def test_add_allocates_a_pair(self, *_):
         f = F.LbPeeringForm(LB_OK); self.assertTrue(f.is_valid(), f.errors)
-        p = f.params()
-        self.assertEqual(p["vip_prefixes"], ["172.16.200.0/28", "172.16.201.0/28"])
-        self.assertEqual((p["attach_to"], p["switches"], p["vrf"], p["vni"]), ("border leaves", ["border1", "border2"], "web", 10150))
+        p = f.params(); a, b = p["members"]
+        self.assertEqual((p["op"], p["names"], p["vrid"], p["tier_vlan"], p["span_added"], p["vrrp_address"]), ("add", ["lb3", "lb4"], 103, 20, True, "172.16.20.20/24"))
+        self.assertEqual((a["asn"], a["peering_vlan"], a["peering_subnet"], a["address"], a["border_port"], a["es"], a["priority"], a["partner"]),
+                         (65330, 170, "172.16.170.0/29", "172.16.20.21/24", "eth8", 15, 150, "lb4"))
+        self.assertEqual((b["asn"], b["peering_vlan"], b["peering_subnet"], b["address"], b["border_port"], b["es"], b["priority"], b["partner"]),
+                         (65340, 180, "172.16.180.0/29", "172.16.20.22/24", "eth9", 16, 100, "lb3"))
+        self.assertIn("active / standby", p["plan_text"]); self.assertIn("extended to the border leaves", p["plan_text"])
 
-    def test_device_already_peering(self, _m):
-        f = F.LbPeeringForm({**LB_OK, "device": "lb2"}); self.assertFalse(f.is_valid()); self.assertIn("device", f.errors)
+    def test_add_web_skips_used_addresses_asns_subnets(self, *_):
+        lab = {**LAB, "asns_used": LAB["asns_used"] + [65330], "hosts": LAB["hosts"] + [{"name": "x", "address": "172.16.10.20/24"}],
+               "subnets_used": LAB["subnets_used"] + [ipaddress.ip_network("172.16.170.0/28")]}
+        with mock.patch("workflows.labmodel.model", return_value=lab):
+            f = F.LbPeeringForm({**LB_OK, "tier": "web"}); self.assertTrue(f.is_valid(), f.errors); p = f.params()
+        a, b = p["members"]
+        self.assertEqual((a["asn"], b["asn"]), (65340, 65350))            # 65330 taken; the two members never share
+        self.assertEqual((a["peering_subnet"], b["peering_subnet"]), ("172.16.150.0/29", "172.16.180.0/29"))
+        self.assertEqual((p["vrrp_address"], a["address"], b["address"], p["span_added"]), ("172.16.10.21/24", "172.16.10.22/24", "172.16.10.23/24", False))
 
-    def test_asn_in_use(self, _m):
-        f = F.LbPeeringForm({**LB_OK, "asn": 65121}); self.assertFalse(f.is_valid()); self.assertIn("asn", f.errors)
+    def test_add_needs_a_tier(self, *_):
+        f = F.LbPeeringForm({**LB_OK, "tier": ""}); self.assertFalse(f.is_valid()); self.assertIn("tier", f.errors)
 
-    def test_vip_overlaps_a_tier(self, _m):
-        f = F.LbPeeringForm({**LB_OK, "vip_prefixes": "172.16.10.0/28"}); self.assertFalse(f.is_valid()); self.assertIn("vip_prefixes", f.errors)
+    def test_add_none_left(self, *_):
+        with mock.patch("workflows.lbs.added", return_value=["lb3", "lb4", "lb5", "lb6"]):
+            f = F.LbPeeringForm(LB_OK); self.assertFalse(f.is_valid()); self.assertIn("spare ports", str(f.errors))
 
-    def test_vip_not_a_prefix(self, _m):
-        f = F.LbPeeringForm({**LB_OK, "vip_prefixes": "172.16.200.5/28"}); self.assertFalse(f.is_valid())
+    def test_second_pair_is_lb5_lb6(self, *_):
+        from . import lbs
+        with mock.patch("workflows.lbs.added", return_value=["lb3", "lb4"]):
+            self.assertEqual(lbs.next_pair(), (5, 6)); self.assertEqual(lbs.last_pair(), ["lb3", "lb4"])
 
-    def test_peering_and_vips_overlap(self, _m):
-        f = F.LbPeeringForm({**LB_OK, "vip_prefixes": "172.16.150.0/28"}); self.assertFalse(f.is_valid())
+    def test_design_pair_cannot_go(self, *_):
+        f = F.LbPeeringForm({**LB_OK, "action": "delete:lb1+lb2"}); self.assertFalse(f.is_valid()); self.assertIn("design", str(f.errors["action"]))
+
+    def test_delete_last_pair_only(self, *_):
+        prs = [{"name": n, "vrf": "app", "asn": a, "vlan": v, "subnet": f"172.16.{v}.0/29", "added": True, "tier_vlan": 20, "span_added": True,
+                "border_port": f"eth{5 + int(n[2:])}", "ha": {"address": "172.16.20.20/24"}} for n, a, v in (("lb5", 65350, 190), ("lb6", 65360, 200))]
+        lbs_ = {**LAB["lbs"], **{n: {"vrf": "web", "peering": {"asn": 1}} for n in ("lb3", "lb4")}, "lb5": {"vrf": "app", "peering": prs[0]}, "lb6": {"vrf": "app", "peering": prs[1]}}
+        with mock.patch("workflows.labmodel.model", return_value={**LAB, "lbs": lbs_, "lb_peerings": prs}), \
+             mock.patch("workflows.lbs.added", return_value=["lb3", "lb4", "lb5", "lb6"]):
+            f = F.LbPeeringForm({**LB_OK, "action": "delete:lb3+lb4"}); self.assertFalse(f.is_valid()); self.assertIn("lb5 + lb6 first", str(f.errors["action"]))
+            f = F.LbPeeringForm({**LB_OK, "action": "delete:lb5+lb6", "tier": ""}); self.assertTrue(f.is_valid(), f.errors)
+            p = f.params(); self.assertEqual((p["op"], p["names"], [e["vlan"] for e in p["entries"]]), ("delete", ["lb5", "lb6"], [190, 200]))
+            self.assertIn("back to the leaves", p["plan_text"]); self.assertIn("172.16.20.20/24", p["plan_text"])
+
+    def test_one_request_at_a_time(self, *_):
+        u = User.objects.create_user("h", password="h-password-123")
+        WorkflowRequest.objects.create(workflow="lb-peering", title="t", requested_by=u, status="submitted", parameters={"op": "add"})
+        f = F.LbPeeringForm(LB_OK); self.assertFalse(f.is_valid()); self.assertIn("one at a time", str(f.errors))
+
+    def test_open_pair_holds_its_vlans(self, *_):
+        from .allocate import claims
+        u = User.objects.create_user("h", password="h-password-123")
+        WorkflowRequest.objects.create(workflow="lb-peering", title="t", requested_by=u, status="approved",
+                                       parameters={"op": "add", "members": [{"peering_vlan": 170, "vni": 10170, "peering_subnet": "172.16.170.0/29"},
+                                                                            {"peering_vlan": 180, "vni": 10180, "peering_subnet": "172.16.180.0/29"}]})
+        v, vni, nets = claims(); self.assertTrue({170, 180} <= v and {10170, 10180} <= vni and len(nets) == 2)
+
+    def test_stages_follow_the_action(self, *_):
+        from .catalog import BY_SLUG
+        wf = BY_SLUG["lb-peering"]
+        self.assertEqual(wf.stages_for({"op": "add"})[3][0], "rack"); self.assertEqual(wf.stages_for({"op": "delete"})[2][0], "switches")
 
 
 @patched
@@ -128,8 +185,8 @@ class RequestFlowTests(TestCase):
         self.assertEqual(list(wr.events.values_list("kind", flat=True)), ["submitted"])
 
     def test_lb_request(self, _m):
-        self.submit(self.alice, "lb-peering", LB_OK)
-        self.assertEqual(WorkflowRequest.objects.get().title, "Peer load balancer lb1 (AS 65310) with the border leaves")
+        with lb_env[0], lb_env[1], lb_env[2]: self.submit(self.alice, "lb-peering", LB_OK)
+        self.assertEqual(WorkflowRequest.objects.get().title, "Add load balancer pair lb3 + lb4 (active / standby) in VRF app, peering with the border leaves")
 
     def test_requesters_see_only_their_own(self, _m):
         self.submit(self.alice); wr = WorkflowRequest.objects.get()
@@ -278,7 +335,8 @@ class ApiTests(TestCase):
         c, r = self.sign_in("alice", "alice-password-1"); h = {"HTTP_X_CSRFTOKEN": r.json()["csrf"]}
         bad = c.post("/api/requests", {"workflow": "add-vlan", "data": {**VLAN_OK, "vlan_id": 10}}, content_type="application/json", **h)
         self.assertEqual(bad.status_code, 400); self.assertIn("vlan_id", bad.json()["errors"])
-        ok = c.post("/api/requests", {"workflow": "lb-peering", "data": {**LB_OK, "bfd": True}}, content_type="application/json", **h)
+        with lb_env[0], lb_env[1], lb_env[2]:
+            ok = c.post("/api/requests", {"workflow": "lb-peering", "data": LB_OK}, content_type="application/json", **h)
         self.assertEqual(ok.status_code, 200, ok.content); rid = ok.json()["id"]
         self.assertEqual(WorkflowRequest.objects.get(pk=rid).parameters["bfd"], True)
         self.assertEqual(c.post(f"/api/requests/{rid}/approve", {"note": ""}, content_type="application/json", **h).status_code, 403)

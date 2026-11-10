@@ -38,7 +38,7 @@ class Command(BaseCommand):
     def carry_out(self, r):                    # (not "execute": that is BaseCommand's own)
         self.stdout.write(f"#{r.pk} {r.title}: running")
         r.log(None, "started", "the worker started carrying it out")
-        prog = Progress(r, BY_SLUG[r.workflow].stages)
+        prog = Progress(r, BY_SLUG[r.workflow].stages_for(r.parameters))
         try:
             result = EXECUTORS[r.workflow](r, prog) or {}
             r.result = {**result, "finished": timezone.now().isoformat()}; r.status = R.Status.DONE

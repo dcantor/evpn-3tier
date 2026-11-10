@@ -2,6 +2,38 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.27.0] - 2026-11-10
+
+### Added
+- **Set up a load balancer to peer with the fabric** is now *Add a new load balancer pair* or *Delete* one: load
+  balancers come in pairs, highly available active / standby (keepalived VRRP, unicast, on the VRRP virtual MAC). The
+  requester picks the action from the dropdown and, for Add, the tier (VRF) the pair serves; everything else is
+  allocated and shown read-only on the form (the Why box is the only text to write). Member k (3-6): index 22+k, mgmt
+  10.18.0.(50+k), Ethernet Segment 12+k, bond legs border1 / border2 eth(5+k), AS 65300+10k, peering VLAN 140+10k
+  (L2VNI 10000+VLAN) and 172.16.<VLAN>.0/29 (the next free value when taken). The pair: VRID 100+k, a shared VRRP
+  address and one address per member in the tier's VLAN (extended to the border leaves when it is not there yet); the
+  first member is active (priority 150). No VIPs at this stage: BIRD peers with both borders, the fabric accepts
+  nothing. Stages: pre-flight -> phpIPAM -> Nautobot (devices, interfaces, addresses, cables, the VRRP address, the
+  plan) -> rack and cable (both VMs) -> switches pipeline -> loadbalancers pipeline (whole lab verified) -> checks (per
+  member BGP + BFD from both borders, the segment, BIRD, the gateway; the active member holds the VRRP address; a
+  live failover test: keepalived stopped on the active one, the standby takes over and a server still reaches it,
+  then back) -> ping from the WAN. Two pairs at most (lb3 + lb4, lb5 + lb6).
+- **Delete a pair**: only an added pair, the last one first; lb1 + lb2 (the web VIP pair) cannot be deleted. The tier
+  VLAN goes back to the leaves when it was extended for the pair and nothing else on the borders uses it.
+- The border leaves have four spare ports, eth8-eth11 (added once, one border restarted at a time, verified; spare
+  and disabled in Nautobot).
+- lab.conf: `added-lbs.conf` (written by the workflow, not in git) holds the added load balancers; `E3T_PLAN_LBS`
+  previews them. Fabric Factory forms: a field can be shown only for one choice of another (`ui.when`), and a
+  read-only field can show text picked by the current choices (`computed` `keys` / `map`); a workflow's stages can
+  depend on the request (`stages_by`). Open load balancer requests hold both members' VLANs and subnets.
+
+### Changed
+- loadbalancers pipeline: HAProxy and keepalived's web VIP only on lb1 + lb2 (added members are skipped and are not
+  their keepalived peers); a new play renders keepalived for added pairs from `lb_peerings[].ha`; the network play
+  creates /usr/local/sbin and the pair play /etc/keepalived (a freshly built VM lacks them). switches pipeline: a load
+  balancer with no VIPs gets a deny-all import prefix-list.
+- The free-form peering form (device, ASN, VLAN, subnet, VIPs) is gone; its executor with it.
+
 ## [0.26.0] - 2026-11-09
 
 ### Added

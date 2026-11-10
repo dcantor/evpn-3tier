@@ -20,6 +20,10 @@ set interfaces ethernet eth4 description 'access: fw2 eth1'
 set interfaces ethernet eth5 description 'access: lb1 eth1'
 set interfaces ethernet eth6 description 'access: lb2 eth1'
 set interfaces ethernet eth7 description 'wan: wan eth1'
+set interfaces ethernet eth8 description 'unwired'
+set interfaces ethernet eth9 description 'unwired'
+set interfaces ethernet eth10 description 'unwired'
+set interfaces ethernet eth11 description 'unwired'
 set protocols bgp system-as 65121
 set protocols bgp parameters router-id 10.61.0.21
 set protocols bgp address-family ipv4-unicast network 10.61.0.21/32

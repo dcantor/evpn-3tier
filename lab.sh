@@ -38,7 +38,7 @@ ensure_networks() {
 }
 
 # ---- point-to-point links (UDP tunnels between VMs) -----------------------------------------------------------------------
-port_local() {   # the port a NIC listens on when it anchors a link: nodes 1-20 in UDP_BASE, 21-40 (added leaves) in UDP_BASE2
+port_local() {   # the port a NIC listens on when it anchors a link: nodes 1-20 in UDP_BASE, 21-40 (added leaves, lbs) in UDP_BASE2
   local i=${NODE_IDX[$1]}
   if (( i <= 20 )); then echo $(( UDP_BASE + i*100 + $2 )); else echo $(( UDP_BASE2 + (i-21)*100 + $2 )); fi
 }
@@ -296,6 +296,7 @@ cmd_inventory() {  # the lab as JSON (tools/inventory.py) — what the renderer,
     for v in "${TRANSIT[@]}"; do echo "TRANSIT $v"; done
     for v in "${LINUX_NET[@]}"; do echo "LINUXNET $v"; done
     for n in "${!FW_ES[@]}"; do echo "FWES $n ${FW_ES[$n]}"; done
+    for n in "${!LB_ES[@]}"; do echo "LBES $n ${LB_ES[$n]}"; done
     for v in "${FW_POLICY[@]}"; do echo "FWPOLICY $v"; done
     echo "ESCONF $ES_SYS_MAC_PREFIX ${ES_DF_PREF[*]}"
     for n in "${ALL_NODES[@]}"; do

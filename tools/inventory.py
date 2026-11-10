@@ -3,7 +3,7 @@
 and the portal read. lab.conf stays the one source; this only reshapes it (and derives the addressing plan)."""
 import ipaddress, json, sys
 
-lab, nodes, links, vrfs, vlans, transit, linux, fw_es = {}, {}, [], [], [], [], {}, {}
+lab, nodes, links, vrfs, vlans, transit, linux, fw_es, lb_es = {}, {}, [], [], [], [], {}, {}, {}
 for line in sys.stdin:
     f = line.split()
     if not f: continue
@@ -32,6 +32,8 @@ for line in sys.stdin:
         linux[name] = {"vlan": int(vid), "hostnum": int(hostnum), "es": int(es)}
     elif f[0] == "FWES":
         fw_es[f[1]] = int(f[2])
+    elif f[0] == "LBES":                     # an added load balancer: its segment; its VLANs are Nautobot's
+        lb_es[f[1]] = int(f[2])
     elif f[0] == "FWPOLICY":
         _, src, dst, proto, port, to = f
         lab.setdefault("fw_policy", []).append({"from": src, "to": dst, "proto": proto, "port": None if port == "-" else port, "dest": to})
@@ -68,13 +70,13 @@ for name, l in linux.items():
 es = lab.pop("es")
 segments = []
 for n in nodes.values():
-    num = (n.get("net") or {}).get("es") or fw_es.get(n["name"])
+    num = (n.get("net") or {}).get("es") or fw_es.get(n["name"]) or lb_es.get(n["name"])
     if num is None: continue
     legs = sorted(((p["peer"], p["peer_port"]) for p in n["ports"] if p.get("kind") == "access"), key=lambda x: nodes[x[0]]["idx"])
     seg = {"es": num, "node": n["name"], "role": n["role"], "sys_mac": f"{es['sys_mac_prefix']}:{num:02x}",
            "legs": [{"switch": s, "port": pp, "df_pref": es["df_pref"][min(i, len(es["df_pref"]) - 1)]} for i, (s, pp) in enumerate(legs)]}
     # what the segment carries: a Linux VM its tier VLAN, a firewall every transit VLAN
-    seg["vlans"] = [n["net"]["vlan"]] if n.get("net") else [t["vlan"] for t in transit]
+    seg["vlans"] = [n["net"]["vlan"]] if n.get("net") else [] if n["name"] in lb_es else [t["vlan"] for t in transit]
     segments.append(seg)
 bad = [x["vlan"] for x in vlans + transit] + [x["l3vlan"] for x in vrfs]
 bad = [v for v in bad if not 1 <= v <= 4094]

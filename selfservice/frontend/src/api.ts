@@ -37,7 +37,9 @@ export type Field = {
   name: string; label: string; type: "text" | "textarea" | "number" | "select" | "multiselect" | "checkbox" | "allocate" | "computed"; required: boolean; help: string;
   initial: unknown; choices: { value: string; label: string }[] | null; min: number | null; max: number | null; max_length: number | null;
   // allocate: a button that asks the server for values (endpoint), filling `fills`; computed: read-only, from a template or the allocation
-  ui?: { button?: string; endpoint?: string; fills?: string[]; depends?: string[]; template?: string; from?: string };
+  ui?: { button?: string; endpoint?: string; fills?: string[]; depends?: string[]; template?: string; from?: string;
+        when?: { field: string; value: string };          // shown only while another field has this value
+        keys?: string[]; map?: Record<string, string> };   // computed: the text for the first key (filled from the values) in map
 };
 export type VlanAllocation = { vlan_id: number; vni: number; subnet: string; gateway: string; name: string | null; source: { vlan: string; subnet: string } };
 export type FormSpec = { slug: string; name: string; summary: string; will_do: string[]; fields: Field[] };

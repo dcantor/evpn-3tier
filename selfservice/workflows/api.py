@@ -41,7 +41,7 @@ def summary(r):
 def detail(r, user):
     wf = BY_SLUG.get(r.workflow)
     return {**summary(r), "parameters": r.parameters, "reason": r.reason, "result": r.result, "progress": r.progress,
-            "will_do": wf.will_do if wf else [], "stages": [{"key": k, "label": l} for k, l in (wf.stages if wf else ())],
+            "will_do": wf.will_do if wf else [], "stages": [{"key": k, "label": l} for k, l in (wf.stages_for(r.parameters) if wf else ())],
             "events": [{"id": e.pk, "at": e.at, "kind": e.kind, "actor": _user(e.actor), "message": e.message}
                        for e in r.events.select_related("actor")],
             "can": services.allowed(r, user)}
@@ -58,11 +58,12 @@ def form_schema(form):
                     "help": str(f.help_text or ""), "initial": form.get_initial_for_field(f, name),
                     "choices": [{"value": v, "label": str(l)} for v, l in getattr(f, "choices", [])] if kind in ("select", "multiselect") else None,
                     "min": getattr(f, "min_value", None), "max": getattr(f, "max_value", None), "max_length": getattr(f, "max_length", None),
-                    **({"type": ui[name]["type"], "ui": ui[name]} if name in ui else {})})
+                    **({"ui": ui[name], **({"type": ui[name]["type"]} if "type" in ui[name] else {})} if name in ui else {})})
     for c in getattr(form, "computed", []):
         at = next((i for i, x in enumerate(out) if x["name"] == c["after"]), len(out) - 1) + 1
         out.insert(at, {"name": c["name"], "label": c["label"], "type": "computed", "required": False, "help": c["help"], "initial": None,
-                        "choices": None, "min": None, "max": None, "max_length": None, "ui": {"template": c["template"]}})
+                        "choices": None, "min": None, "max": None, "max_length": None,
+                        "ui": {"template": c["template"], **({"keys": c["keys"], "map": c["map"]} if "map" in c else {})}})
     return out
 
 

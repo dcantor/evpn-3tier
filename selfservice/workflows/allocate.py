@@ -28,6 +28,8 @@ def claims(exclude_pk=None):
         for key in ("subnet", "peering_subnet"):
             if p.get(key): nets.append((ipaddress.ip_network(p[key]), f"request #{r.pk}"))
         for x in p.get("vip_prefixes") or []: nets.append((ipaddress.ip_network(x), f"request #{r.pk}"))
+        for x in p.get("members") or []:                     # a load balancer pair: each member's peering VLAN and subnet
+            vlans.add(int(x["peering_vlan"])); vnis.add(int(x["vni"])); nets.append((ipaddress.ip_network(x["peering_subnet"]), f"request #{r.pk}"))
     return vlans, vnis, nets
 
 

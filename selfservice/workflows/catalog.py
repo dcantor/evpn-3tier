@@ -3,6 +3,8 @@ the live lab, a title template, and a description of what executing it will do (
 Nautobot change). Add a workflow = add an entry here and its form."""
 from dataclasses import dataclass
 
+from . import lbs
+
 
 @dataclass(frozen=True)
 class Workflow:
@@ -13,6 +15,10 @@ class Workflow:
     form: str                # the form class name in forms.py
     title: str               # str.format(**cleaned_data)
     stages: tuple = ()       # (key, label): what the progress view shows; the executor marks each (progress.Progress.stage)
+    stages_by: dict = None   # other stages for some requests: {parameters["op"]: stages}
+
+    def stages_for(self, params):
+        return (self.stages_by or {}).get((params or {}).get("op"), self.stages)
 
 
 CATALOG = [
@@ -39,15 +45,16 @@ CATALOG = [
              "RemoveVlanForm", "Remove VLAN {vlan_id} ({name}) from the fabric ({subnet})",
              (("preflight", "Pre-flight checks"), ("nautobot", "Nautobot"), ("switches", "Switches pipeline"), ("firewalls", "Firewalls pipeline"), ("checks", "Device and WAN checks"), ("phpipam", "phpIPAM release"))),
     Workflow("lb-peering", "Set up a load balancer to peer with the fabric",
-             "A load balancer on the fabric announcing its VIP prefixes to the switch pair it is dual-homed to, over eBGP (BFD optional), in its VRF.",
-             ["Nautobot: the peering in the evpn-3tier plan (ASN, peering VLAN and subnet, VIP prefixes, BFD), its VLAN and prefixes",
-              "evpn-3tier-switches pipeline: the peering VLAN on the switch pair and on the load balancer's bond legs, eBGP accepting only the VIPs",
-              "evpn-3tier-loadbalancers pipeline: the peering VLAN on the load balancer, the VIPs on it, BIRD peering with both switches",
-              "phpIPAM: the peering subnet and its addresses, the VIP prefixes",
-              "checks: both sessions up, the VIPs routed in the fabric, a VIP answering HTTP from a server in the VRF"],
-             "LbPeeringForm", "Peer load balancer {device} (AS {asn}) with the {attach_to}",
-             (("nautobot", "Nautobot"), ("switches", "Switches pipeline"), ("loadbalancers", "Load balancers pipeline"),
-              ("phpipam", "phpIPAM"), ("checks", "BGP and VIP checks"))),
+             "Add a new load balancer pair — two VMs dual-homed to the border leaves, highly available (active / standby, keepalived VRRP), in the tier you pick, each peering with both borders over eBGP — or delete the last pair added. You choose Add or Delete and the tier; everything else is allocated and done behind the scenes. No VIPs yet.",
+             ["pre-flight: the borders' next two spare ports up and uncabled, host memory, the names, addresses, ASNs and peering VLANs free in Nautobot, phpIPAM and the lab",
+              "phpIPAM: the pair's shared VRRP address; per member the management and tier addresses, the peering VLAN, its /29 and the three addresses in it",
+              "Nautobot: both devices (eth0-eth2, bond0, the tier VLAN interface and address), cables to border1 / border2, the VRRP address, the tier VLAN onto the borders if needed, both peerings in the evpn-3tier plan (ASN, VLAN, subnet, BFD, no VIPs) with the pair's VRRP settings",
+              "rack and cable: both VMs built and booted on the borders' spare ports",
+              "evpn-3tier-switches pipeline: the Ethernet Segments on both borders, the peering VLANs, eBGP accepting nothing until there are VIPs",
+              "evpn-3tier-loadbalancers pipeline: the bonds, the tier VLAN and default route, keepalived VRRP (the first member active, the second standby), BIRD peering with both borders (no HAProxy: lb1 + lb2 keep the web VIP); the whole lab verified",
+              "checks: per member both sessions and BFD up, the segment on both borders, BIRD Established, the gateway answering; the active member holds the VRRP address and a server reaches it; a live failover (keepalived stopped on the active one: the standby takes over, the server still reaches it, then back); ping test from the WAN",
+              "Delete (the last pair added): Nautobot first, the switches pipeline takes the segments and peerings off the borders, both VMs deleted, phpIPAM released last"],
+             "LbPeeringForm", "{summary}", lbs.ADD_STAGES, {"delete": lbs.DELETE_STAGES}),
     Workflow("vlan-span", "Change a VLAN's span",
              "Put a tier VLAN on the border leaves too (where the firewalls and load balancers attach), or take it back to the leaves only. Not away from the borders while something attached to them uses it.",
              ["pre-flight: the VLAN is in the plan; nothing attached to the border leaves uses it if the borders are to go",

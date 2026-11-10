@@ -109,70 +109,74 @@ class RemoveVlanForm(RequestForm):
 
 
 class LbPeeringForm(RequestForm):
-    field_order = ["device", "asn", "peering_vlan", "peering_subnet", "vip_prefixes", "bfd", "reason"]
-    device = forms.ChoiceField(label="Load balancer", help_text="A load balancer on the fabric (from Nautobot): it peers with the switch pair it is dual-homed to, in its own VRF.")
-    asn = forms.IntegerField(label="Its ASN", min_value=64512, max_value=65534, help_text="A private ASN the lab does not use.")
-    peering_vlan = forms.IntegerField(label="Peering VLAN", min_value=2, max_value=4094, help_text="The VLAN the BGP sessions run in (not used in the lab). Its L2VNI will be 10000 + the VLAN ID.")
-    peering_subnet = forms.CharField(label="Peering subnet", help_text="e.g. 172.16.150.0/29 — the switches take .1 and .2, the load balancer the last usable address.")
-    vip_prefixes = forms.CharField(label="VIP prefixes it may announce", widget=forms.Textarea(attrs={"rows": 3}),
-                                   help_text="One per line, e.g. 172.16.200.0/28 — inside 172.16.0.0/16, overlapping no existing subnet. The fabric accepts only these; the load balancer serves the first address of each.")
-    bfd = forms.BooleanField(label="BFD on the sessions", required=False, initial=True)
+    """Add a new load balancer pair (highly available, active / standby with keepalived VRRP; dual-homed to the border
+    leaves, each member peering with both over eBGP, in the tier the requester picks) or delete the last pair added.
+    Everything but the tier is allocated (lbs.py) and shown read-only; no VIPs yet."""
+    field_order = ["action", "tier", "reason"]
+    action = forms.ChoiceField(label="Load balancer pair", help_text="Load balancers come in pairs (active / standby). Add a new pair on the border leaves' next spare ports, or delete one: only the pairs added here, the last one first; lb1 + lb2 hold the web VIP.")
+    tier = forms.ChoiceField(label="Tier (VRF) it serves", required=False,
+                             help_text="The pair's addresses and its shared VRRP address go in this VRF's VLAN (extended to the border leaves if it is not there yet). No VIPs are set up at this stage.")
+    ui = {"tier": {"when": {"field": "action", "value": "add"}}}
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
-        lbs = _model().get("lbs", {})
-        self.fields["device"].choices = [(k, f"{k} — {v['pair']} ({', '.join(v['switches'])}), VRF {v['vrf']}" + (" — already peering" if v.get("peering") else ""))
-                                         for k, v in lbs.items()]
-
-    def clean_device(self):
-        d = self.cleaned_data["device"]; lb = _model()["lbs"][d]
-        if lb.get("peering"): raise forms.ValidationError(f"{d} already peers with the fabric (AS {lb['peering']['asn']}).")
-        if not lb.get("pair") or not lb.get("vrf"): raise forms.ValidationError(f"{d} is not dual-homed to a switch pair in a VRF (Nautobot).")
-        return d
-
-    def clean_asn(self):
-        a = self.cleaned_data["asn"]; m = _model()
-        if a in m["asns_used"]: raise forms.ValidationError(f"AS {a} is used in the lab ({', '.join(map(str, m['asns_used']))}).")
-        return a
-
-    def clean_peering_vlan(self):
-        v = self.cleaned_data["peering_vlan"]; m = _model(); held, held_vni = _held_vlans()
-        if v in m["vlans_used"] or v in held: raise forms.ValidationError(f"VLAN {v} is in use.")
-        if 10000 + v in m["vnis_used"] or 10000 + v in held_vni: raise forms.ValidationError(f"VNI {10000 + v} is in use.")
-        return v
-
-    def _net(self, s, what):
-        try: net = ipaddress.ip_network(s.strip(), strict=True)
-        except ValueError: raise forms.ValidationError(f"{what}: '{s.strip()}' is not a prefix (network address / length).")
-        if net.version != 4 or not net.subnet_of(labmodel.FABRIC_SUPERNET): raise forms.ValidationError(f"{what}: {net} must be IPv4 inside {labmodel.FABRIC_SUPERNET}.")
-        if clash := _clash(net): raise forms.ValidationError(f"{what}: {net} overlaps {', '.join(clash)}.")
-        return net
-
-    def clean_peering_subnet(self):
-        net = self._net(self.cleaned_data["peering_subnet"], "peering subnet")
-        if not 28 <= net.prefixlen <= 29: raise forms.ValidationError("peering subnet: a /28 or /29 (two switches and the load balancer).")
-        return str(net)
-
-    def clean_vip_prefixes(self):
-        lines = [l for l in self.cleaned_data["vip_prefixes"].splitlines() if l.strip()]
-        if not lines: raise forms.ValidationError("At least one prefix.")
-        nets = [self._net(l, "VIP prefix") for l in lines]
-        if any(n.prefixlen > 30 for n in nets): raise forms.ValidationError("VIP prefixes: /30 or larger (the first address is the VIP).")
-        for i, x in enumerate(nets):
-            for y in nets[i + 1:]:
-                if x.overlaps(y): raise forms.ValidationError(f"{x} and {y} overlap.")
-        return [str(n) for n in nets]
+        from . import lbs
+        m = _model(); self.fields["action"].choices = lbs.choices(m)
+        tiers = []
+        for v in m["tier_vrfs"]:
+            tv = lbs.tier_vlan(m, v)
+            if tv: tiers.append((v, f"{v} — VLAN {tv['vlan']}, {tv['subnet']}" + ("" if "borders" in tv["on"] else " (extended to the border leaves)")))
+        self.fields["tier"].choices = tiers
+        # the plan for each choice, shown read-only under the tier (computed: the front end picks the text by the choices)
+        texts = {"": "— choose Add or Delete —", "add": "— choose the tier it serves —"}
+        nxt = lbs.next_pair()
+        if nxt:
+            for v, _ in tiers: texts[f"add|{v}"] = lbs.plan_text(lbs.plan(nxt, v, m))
+        else: texts["add"] = "None left: the borders' four spare ports are all used (lb3 + lb4, lb5 + lb6)."
+        last = lbs.last_pair()
+        for pr in lbs.pairs(m):
+            if not pr: continue
+            key = f"delete:{'+'.join(pr)}"
+            if pr == last:
+                es = [next((x for x in m.get("lb_peerings", []) if x["name"] == n), None) for n in pr]
+                texts[key] = lbs.delete_text(pr, es) if all(es) else f"{lbs.pair_name(pr)}: no peerings in Nautobot."
+            else:
+                texts[key] = (f"{lbs.pair_name(pr)} cannot be deleted: " + ("it is part of the lab's design (it holds the web VIP)." if pr == lbs.DESIGN_PAIR or not last or not set(pr) <= set(lbs.added())
+                                                                           else f"delete {lbs.pair_name(last)} first."))
+        self.computed = [{"name": "plan", "label": "What it will be (allocated)", "after": "tier", "help": "Allocated by Fabric Factory and checked again when the request runs.",
+                          "template": "", "keys": ["{action}|{tier}", "{action}"], "map": texts}]
 
     def clean(self):
         c = super().clean()
-        ps, vips = c.get("peering_subnet"), c.get("vip_prefixes") or []
-        if ps and any(ipaddress.ip_network(ps).overlaps(ipaddress.ip_network(v)) for v in vips):
-            raise forms.ValidationError("The peering subnet and the VIP prefixes overlap.")
+        from . import lbs
+        act = c.get("action") or ""; m = _model()
+        if _open("lb-peering").exists(): raise forms.ValidationError("A load balancer request is already open: one at a time.")
+        if act == "add":
+            nxt = lbs.next_pair()
+            if not nxt: raise forms.ValidationError("The borders' spare ports are all used: at most two pairs can be added (lb3 + lb4, lb5 + lb6).")
+            if not c.get("tier"): self.add_error("tier", "Choose the tier it serves."); return c
+            pl = lbs.plan(nxt, c["tier"], m)
+            if not pl.get("vrrp_address"): self.add_error("tier", f"No three free addresses in VRF {c['tier']}'s VLAN."); return c
+            free = lbs.mem_available_mib()
+            if free < 2 * lbs.RAM_MIB + 1024: raise forms.ValidationError(f"The host has {free} MiB available: two load balancers need {2 * lbs.RAM_MIB} MiB plus 1 GiB headroom.")
+            pl["summary"] = f"Add load balancer pair {pl['pair']} (active / standby) in VRF {pl['vrf']}, peering with the border leaves"
+            pl["plan_text"] = lbs.plan_text(pl); c["plan"] = pl
+        elif act.startswith("delete:"):
+            names = act.split(":", 1)[1].split("+"); last = lbs.last_pair()
+            if not all(n in m.get("lbs", {}) for n in names): raise forms.ValidationError(f"There is no load balancer pair {lbs.pair_name(names)}.")
+            if names == lbs.DESIGN_PAIR or not set(names) <= set(lbs.added()):
+                self.add_error("action", f"{lbs.pair_name(names)} is part of the lab's design (it holds the web VIP): it cannot be deleted."); return c
+            if names != last: self.add_error("action", f"Only the last pair added can be deleted: {lbs.pair_name(last)} first."); return c
+            es = [next((x for x in m.get("lb_peerings", []) if x["name"] == n), None) for n in names]
+            if not all(e and e.get("added") for e in es): raise forms.ValidationError(f"{lbs.pair_name(names)} has no peerings Fabric Factory added in Nautobot.")
+            c["plan"] = {"op": "delete", "names": names, "pair": lbs.pair_name(names), "vrf": es[0]["vrf"], "entries": es,
+                         "plan_text": lbs.delete_text(names, es), "summary": f"Delete load balancer pair {lbs.pair_name(names)} (VRF {es[0]['vrf']})"}
+        else:
+            self.add_error("action", "Choose Add or Delete.")
         return c
 
     def params(self):
-        p = super().params(); lb = _model()["lbs"][p["device"]]
-        p.update(attach_to=lb["pair"], switches=lb["switches"], vrf=lb["vrf"], vni=10000 + p["peering_vlan"]); return p
+        return dict(self.cleaned_data["plan"])
 
 
 # ---- change a VLAN's span ---------------------------------------------------------------------------------------------------
