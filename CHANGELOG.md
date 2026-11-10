@@ -2,6 +2,13 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.24.1] - 2026-11-09
+
+### Fixed
+- The web app's 30-second lab-model cache now refreshes as soon as a request has finished: the worker changes Nautobot
+  in its own process, so a profile, VLAN or owner it had just created could be missing from the forms for up to 30 s
+  (found while recording the demo: a new profile was not yet offered).
+
 ## [0.24.0] - 2026-11-09
 
 ### Added

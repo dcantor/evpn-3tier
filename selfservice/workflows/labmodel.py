@@ -65,7 +65,7 @@ def _from_lab():
 
 
 def model():
-    if _cache["v"] is not None and time.time() - _cache["t"] < 30: return _cache["v"]
+    if _cache["v"] is not None and time.time() - _cache["t"] < 30 and not _changed_since(_cache["t"]): return _cache["v"]
     try: ctx, ev, nodes, source = _from_nautobot()
     except Exception as e:                                                    # noqa: BLE001
         log.warning("lab model from Nautobot failed (%s): using lab.conf", e); ctx, ev, nodes, source = _from_lab()
@@ -145,6 +145,17 @@ def _base_vlans():
         return {v["vlan"] for v in inv["evpn"]["vlans"]}
     except Exception as e:                                                    # noqa: BLE001 — unknown: protect everything
         log.warning("lab.conf VLANs unknown (%s): no VLAN is removable", e); return {0} | set(range(1, 4095))
+
+
+def _changed_since(t):
+    """Has a request finished since t? The worker changes Nautobot in its own process: the web app's cache must not hide
+    it (a new profile, VLAN or owner would be missing from the forms for up to 30 s)."""
+    try:
+        import datetime
+        from .models import WorkflowRequest as R
+        return R.objects.filter(status__in=("done", "failed"), updated__gt=datetime.datetime.fromtimestamp(t, datetime.timezone.utc)).exists()
+    except Exception:                                                         # noqa: BLE001
+        return False
 
 
 def invalidate():
