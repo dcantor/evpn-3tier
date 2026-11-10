@@ -854,3 +854,65 @@ class LeafPairTests(TestCase):
         with mock.patch("workflows.labmodel.model", return_value=lab):
             f = F.RemoveLeafPairForm(data={"pair": "5,6", "confirm": "rack3", "reason": "x"})
             self.assertTrue(f.is_valid(), f.errors); self.assertEqual(f.params()["leaves"], "leaf5 + leaf6")
+
+
+class VrfTests(TestCase):
+    """Add / Delete a VRF: allocation, names, clashes, what keeps a VRF from being deleted, the zone's standard rules."""
+    DATA = {"evpn": {"rt_as": 65500, "vrfs": [{"name": n, "l3vni": 50000 + t, "table": 1000 + t, "l3vlan": 4000 + t, "probe": f"10.255.{t}"}
+                                              for n, t in (("web", 10), ("app", 20), ("db", 30), ("outside", 99))],
+                     "transit": [{"vrf": n, "vlan": v} for n, v in (("web", 110), ("app", 120), ("db", 130), ("outside", 199))],
+                     "vlans": [{"vlan": 10, "vrf": "web", "gateway": "172.16.10.1/24"}, {"vlan": 20, "vrf": "app", "gateway": "172.16.20.1/24"}]},
+            "fw_policy": [], "lb_peerings": []}
+
+    def test_allocation(self):
+        from . import vrfs as V
+        a = V.allocation(1, "pay")
+        self.assertEqual((a["table"], a["l3vni"], a["l3vlan"], a["transit_vlan"], a["transit_vni"], a["subnet"], a["probe"], a["borders"], a["fws"]),
+                         (2001, 51001, 3901, 3801, 13801, "172.16.240.0/28", "10.255.101", ["172.16.240.2", "172.16.240.3"], ["172.16.240.11", "172.16.240.12"]))
+        self.assertEqual(V.allocation(20, "x")["subnet"], "172.16.241.48/28")
+        self.assertTrue(all(V.allocation(z, "x")["subnet"] != V.allocation(z + 1, "x")["subnet"] for z in range(1, 20)))
+
+    def test_next_z_and_limit(self):
+        import copy
+        from . import vrfs as V
+        d = copy.deepcopy(self.DATA); self.assertEqual(V.next_z(d), 1)
+        d["evpn"]["vrfs"] += [{"name": f"v{z}", "z": z} for z in (1, 2, 4)]; self.assertEqual(V.next_z(d), 3)
+        d["evpn"]["vrfs"] += [{"name": f"v{z}", "z": z} for z in range(5, 21)] + [{"name": "v3", "z": 3}]; self.assertIsNone(V.next_z(d))
+
+    def test_clashes(self):
+        from . import vrfs as V
+        m = {"vlans_used": [3801], "vnis_used": [51001], "subnets_used": ["172.16.240.0/24"]}
+        why = V.clashes(V.allocation(1, "web"), m, self.DATA)
+        self.assertTrue(any("VRF web exists" in w for w in why)); self.assertTrue(any("VLAN 3801" in w for w in why))
+        self.assertTrue(any("VNI 51001" in w for w in why)); self.assertTrue(any("overlaps" in w for w in why))
+
+    def test_in_use(self):
+        import copy
+        from . import vrfs as V
+        d = copy.deepcopy(self.DATA)
+        d["evpn"]["vlans"].append({"vlan": 48, "vrf": "pay", "gateway": "172.16.3.1/24"})
+        d["fw_policy"] = [{"from": "pay", "to": "web", "dest": "172.16.10.0/24", "proto": "icmp", "standard": True, "vlan": 10},
+                          {"from": "web", "to": "pay", "dest": "172.16.3.0/24", "proto": "tcp", "port": 443}]
+        why = V.in_use("pay", {"hosts": [{"name": "pay1", "vrf": "pay"}]}, d)
+        self.assertIn("VLAN 48", why); self.assertIn("server pay1", why); self.assertIn("firewall rule web -> pay 172.16.3.0/24 tcp 443", why)
+        self.assertEqual(len(why), 3)                                   # the standard rule does not block: it goes with the zone
+
+    def test_zone_rules(self):
+        from . import fwrules
+        pol, n = fwrules.add_zone([], "pay", self.DATA["evpn"]["vlans"])
+        self.assertEqual(n, 2); self.assertEqual({(r["from"], r["to"], r["vlan"]) for r in pol}, {("pay", "web", 10), ("pay", "app", 20)})
+        self.assertEqual(fwrules.add_zone(pol, "pay", self.DATA["evpn"]["vlans"])[1], 0)
+        pol += fwrules.for_vlan(48, "pay", "172.16.3.0/24", ["web", "app", "db", "outside", "pay"])
+        self.assertEqual(len(pol), 6)
+        pol, n = fwrules.drop_zone(pol + [{"from": "web", "to": "pay", "proto": "tcp", "port": 443}], "pay")
+        self.assertEqual((n, len(pol)), (6, 1))                        # custom rules stay (in_use refuses the delete first)
+
+    def test_forms(self):
+        with mock.patch("workflows.labmodel.model", return_value={**LAB, "vlans_used": [], "vnis_used": [], "subnets_used": []}), \
+             mock.patch("workflows.clients.Nautobot") as nb:
+            nb.return_value.context.return_value = {"data": self.DATA}
+            for bad, msg in (("web", "reserved"), ("x", "2-8"), ("averylongname", "at most 8")):
+                f = F.AddVrfForm(data={"vrf": bad, "reason": "x"}); self.assertFalse(f.is_valid()); self.assertIn(msg, f.errors.as_text())
+            f = F.AddVrfForm(data={"vrf": "pay", "reason": "x"})
+            self.assertTrue(f.is_valid(), f.errors); self.assertEqual((f.params()["z"], f.params().get("vlan_id")), (1, None))
+            f = F.DeleteVrfForm(data={"vrf": "web", "confirm": "web", "reason": "x"}); self.assertFalse(f.is_valid())

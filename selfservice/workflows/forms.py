@@ -261,6 +261,11 @@ class FwRuleForm(RequestForm):
     field_order = ["source", "target", "proto", "dest", "port", "reason"]
     source = forms.ChoiceField(label="From zone", choices=ZONES, help_text="Where the connection starts: the WAN (outside) or a tier VRF.")
     target = forms.ChoiceField(label="To zone", choices=ZONES, help_text="The zone the destination is in.")
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        zs = ZONES + [(v, v) for v in _model().get("tier_vrfs", []) if v not in dict(ZONES)]     # + any VRF added
+        self.fields["source"].choices = self.fields["target"].choices = zs
     proto = forms.ChoiceField(label="Protocol", choices=PROTOS)
     dest = forms.CharField(label="Destination", max_length=43, help_text="An address or a subnet in the 'to' zone, e.g. 172.16.20.11 or 172.16.20.0/24.")
     port = forms.CharField(label="Port", required=False, max_length=11, help_text="TCP / UDP: a port or a range, e.g. 8443 or 9000-9010. Empty for ICMP.")
@@ -639,4 +644,64 @@ class RemoveLeafPairForm(RequestForm):
         why = leafpair.in_use(names)
         if why: raise forms.ValidationError("The pair is in use: " + "; ".join(why) + ". Remove the servers / Default the ports first.")
         c.update(ks=[x["k"] for x in last], leaves=" + ".join(names), rack=last[0]["rack"])
+        return c
+
+
+class AddVrfForm(RequestForm):
+    """Add a VRF: a tier zone behind the firewalls. The requester names it; everything else is allocated (vrfs.py). With a
+    first VLAN (the default) the zone is usable at once: the VLAN gets the next unused ID and phpIPAM's first free /24."""
+    field_order = ["vrf", "first_vlan", "span", "reason"]
+    vrf = forms.CharField(label="VRF name", max_length=8, help_text="2-8 lower-case letters and digits, starting with a letter, e.g. pay. It names the firewall zone too (PAY).")
+    first_vlan = forms.BooleanField(label="Create its first VLAN in the same request", required=False, initial=True,
+                                    help_text="The next unused VLAN ID and phpIPAM's first free /24, with an anycast gateway — so the VRF reaches the leaves at once.")
+    span = forms.ChoiceField(label="First VLAN on", choices=[("leaves", "every leaf"), ("leaves+borders", "every leaf and both border leaves")], initial="leaves", required=False)
+
+    def clean(self):
+        c = super().clean()
+        if not c.get("vrf"): return c
+        from . import allocate, vrfs
+        name = c["vrf"].strip().lower(); m = _model()
+        from .clients import Nautobot
+        data = Nautobot().context()["data"]
+        if not vrfs.NAME.match(name): raise forms.ValidationError("VRF name: 2-8 lower-case letters and digits, starting with a letter.")
+        if name in vrfs.RESERVED: raise forms.ValidationError(f"{name} is reserved.")
+        if _open("add-vrf").exists() or _open("delete-vrf").exists(): raise forms.ValidationError("A VRF request is already open: one at a time.")
+        z = vrfs.next_z(data)
+        if z is None: raise forms.ValidationError(f"{vrfs.MAX_ADDED} VRFs have been added already: the limit.")
+        a = vrfs.allocation(z, name)
+        if why := vrfs.clashes(a, m, data): raise forms.ValidationError("; ".join(why) + ".")
+        c.update(vrf=name, z=z, summary=vrfs.label(a))
+        if c.get("first_vlan"):
+            vid, net = allocate.next_vlan(m), allocate.next_subnet(m)
+            c.update(vlan_id=vid, vni=10000 + vid, subnet=str(net), gateway=f"{net.network_address + 1}/{net.prefixlen}",
+                     name=allocate.vlan_name(vid, name), span=c.get("span") or "leaves")
+            c["summary"] += f"; first VLAN {vid} ({net})"
+        else:
+            c.pop("span", None)
+        return c
+
+
+class DeleteVrfForm(RequestForm):
+    """Delete a VRF added by Fabric Factory. Refused while it holds anything: VLANs, servers, LB peerings, custom rules."""
+    field_order = ["vrf", "confirm", "reason"]
+    vrf = forms.ChoiceField(label="VRF", help_text="Only VRFs added by Fabric Factory; web, app, db and outside are the lab's design.")
+    confirm = forms.CharField(label="Type the VRF name to confirm", max_length=8)
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        from . import vrfs
+        from .clients import Nautobot
+        self._data = Nautobot().context()["data"]
+        self.fields["vrf"].choices = [(v["name"], f"{v['name']} (L3VNI {v['l3vni']})") for v in vrfs.added(self._data)] or [("", "— none: no VRF has been added —")]
+
+    def clean(self):
+        c = super().clean()
+        from . import vrfs
+        mine = next((v for v in vrfs.added(self._data) if v["name"] == c.get("vrf")), None)
+        if not mine: raise forms.ValidationError("Choose a VRF added by Fabric Factory.")
+        if (c.get("confirm") or "").strip() != mine["name"]: raise forms.ValidationError(f"Type {mine['name']} to confirm.")
+        if _open("add-vrf").exists() or _open("delete-vrf").exists(): raise forms.ValidationError("A VRF request is already open: one at a time.")
+        if why := vrfs.in_use(mine["name"], _model(), self._data):
+            raise forms.ValidationError(f"VRF {mine['name']} is in use: {', '.join(why)}. Remove those first.")
+        c.update(z=mine["z"], summary=vrfs.label(vrfs.allocation(mine["z"], mine["name"])))
         return c

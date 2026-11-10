@@ -83,7 +83,7 @@ def model():
                        "peering": next((p for p in peerings if p["name"] == n["name"]), None)}
            for n in sorted(nodes, key=lambda n: n["idx"]) if n["role"] == "lb"}
     # removable VLANs: the plan's tier VLANs, unless the lab's design (lab.conf) has them, hosts sit in them, or they are
-    # the last VLAN of their VRF (its L3 config on the switches would go with it)
+    # the last VLAN of a design VRF (its L3 config on the switches would go with it; an added VRF's may go)
     ports = [{"switch": n["name"], **p} for n in leaves for p in sorted(n.get("ifs") or [], key=lambda p: int(p["name"][3:]))]
     owners = _port_applications()                       # interface id -> application (Port Provisioning: who owns the port)
     for p in ports: p["application"] = owners.get(p.get("id"))
@@ -93,6 +93,7 @@ def model():
             on_ports.setdefault(v, []).append(f"{p['switch']} {p['name']}")
     base = _base_vlans()
     names = ctx.get("_vlan_names", {})
+    added_vrfs = {v['name'] for v in ev['vrfs'] if v.get('z')}       # Add a VRF: its last VLAN may go (then the VRF can be deleted)
     per_vrf = {}
     for v in ev["vlans"]: per_vrf[v["vrf"]] = per_vrf.get(v["vrf"], 0) + 1
     vlans = []
@@ -100,7 +101,7 @@ def model():
         hosts = sorted(n["name"] for n in nodes if v["vlan"] in (n.get("vlans") or []))
         why = ("part of the lab's design (lab.conf)" if v["vlan"] in base else f"hosts attached: {', '.join(hosts)}" if hosts
                else f"provisioned on {', '.join(on_ports[v['vlan']])}" if v["vlan"] in on_ports
-               else f"the last VLAN of VRF {v['vrf']}" if per_vrf[v["vrf"]] == 1 else None)
+               else f"the last VLAN of VRF {v['vrf']}" if per_vrf[v["vrf"]] == 1 and v["vrf"] not in added_vrfs else None)
         vlans.append({"vlan": v["vlan"], "name": names.get(v["vlan"]), "vrf": v["vrf"], "vni": v["vni"], "gateway": v["gateway"],
                       "subnet": str(ipaddress.ip_interface(v["gateway"]).network), "on": v["on"], "blocked": why})
     m = {

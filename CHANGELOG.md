@@ -2,6 +2,25 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.26.0] - 2026-11-09
+
+### Added
+- **Add a VRF** (Fabric Factory workflow): a new tier zone behind the firewall pair — VRF + L3VNI, a transit VLAN with
+  eBGP from both borders to fw1 / fw2, and a firewall zone denying by default except the Standard Firewall Rules (ICMP).
+  The requester names it (2-8 characters); the rest is allocated for added VRF z (1-20): table 2000+z, L3VNI 51000+z,
+  L3VNI VLAN 3900+z, transit VLAN 3800+z (L2VNI 13800+z), the z-th /28 of 172.16.240.0/23 (a phpIPAM pool), probes
+  10.255.(100+z). Optionally with its first VLAN (Add a VLAN's steps in the same request, one run of each pipeline).
+  Subnets are announced to the WAN like the other tiers'. Up to 20 added VRFs.
+- **Delete a VRF**: an added VRF only, refused while it holds a VLAN, a server, an LB peering or a custom firewall rule.
+- `nautobot_seed.py --check` lists added VRFs among what a seed would discard.
+
+### Changed
+- Standard Firewall Rules: the zones come from Nautobot's plan (every VRF with a transit), not a fixed list; a zone
+  added gets ICMP from it to every VLAN, a zone deleted loses every standard rule from or to it. The custom
+  firewall-rule form offers added zones.
+- Add a VLAN's executor is split into steps (phpIPAM, Nautobot, rules, checks) that Add a VRF reuses.
+- Remove a VLAN: the last VLAN of an added VRF may be removed (the design VRFs keep that protection).
+
 ## [0.25.0] - 2026-11-09
 
 ### Added

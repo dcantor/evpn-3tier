@@ -119,9 +119,14 @@ def _ping_from_wan(inv, ssh, extra, log):
     return rows
 
 
-def add_vlan(r, log):
-    p = r.parameters; vid, vrf, vni, gw, span = p["vlan_id"], p["vrf"], p["vni"], p["gateway"], p["span"]
-    net = ipaddress.ip_interface(gw).network
+def _vlan_args(r):
+    p = r.parameters
+    return p, p["vlan_id"], p["vrf"], p["vni"], p["gateway"], p["span"], ipaddress.ip_interface(p["gateway"]).network
+
+
+def _vlan_phpipam(r, log):
+    """Add a VLAN, step 1 (also Add a VRF's first VLAN): reserve in phpIPAM; returns the gateway phpIPAM holds."""
+    p, vid, vrf, vni, gw, span, net = _vlan_args(r)
     # ---- 1 phpIPAM — the source of truth for addressing: reserve first --------------------------------------------------------
     log.stage("phpipam")
     ip = Ipam(); tag = f"request #{r.pk}"
@@ -156,6 +161,12 @@ def add_vlan(r, log):
     gw_ip = next(a["ip"] for a in ip.req("GET", f"subnets/{sub['id']}/addresses") if a["ip"] == str(net.network_address + 1))
     gw = f"{gw_ip}/{net.prefixlen}"
     log(f"phpIPAM: reserved VLAN {vid} ({p['name']}), subnet {net} in VRF {vrf} and the gateway {gw_ip} (the subnet's first host)")
+    return gw
+
+
+def _vlan_nautobot(r, gw, log):
+    """Step 2: the VLAN in Nautobot's plan, its native VLAN and prefix."""
+    p, vid, vrf, vni, _, span, net = _vlan_args(r)
     nb = Nautobot()
     # ---- 2 Nautobot — from phpIPAM's reservation ----------------------------------------------------------------------------
     log.stage("nautobot")
@@ -186,11 +197,17 @@ def add_vlan(r, log):
         nb.patch(f"ipam/prefixes/{pf['id']}", {"location": nb.one("dcim/locations", name=LOCATION)["id"]})
         nb.post("ipam/vrf-prefix-assignments", {"vrf": vrf_obj["id"], "prefix": pf["id"]})
         log(f"Nautobot: prefix {net} in namespace {LOCATION}, VRF {vrf}")
+
+
+def _vlan_rules(r, gw, log):
+    """Step 2b: the VLAN's Standard Firewall Rules."""
+    p, vid, vrf, vni, _, span, net = _vlan_args(r); nb = Nautobot()
     # ---- 2b Standard Firewall Rules: ICMP to the VLAN from every other zone, in Nautobot's fw_policy ----------------------
     log.stage("rules")
     ctx = nb.context(); data = ctx["data"]; before = data.get("fw_policy", [])
-    after, _ = fwrules.merge(before, vid, vrf, net)
-    mine = fwrules.for_vlan(vid, vrf, net)
+    zs = fwrules.zones(data)
+    after, _ = fwrules.merge(before, vid, vrf, net, zs)
+    mine = fwrules.for_vlan(vid, vrf, net, zs)
     if all(m in before for m in mine):
         log(f"Standard Firewall Rules: VLAN {vid}'s are already in Nautobot (a retry)")
     else:
@@ -198,16 +215,11 @@ def add_vlan(r, log):
         log(f"Standard Firewall Rules in Nautobot: ICMP to VLAN {vid} ({net}) from {', '.join(m['from'] for m in mine)} — "
             f"firewall rule {fwrules.rule_number(vid)} in each zone pair")
     labmodel.invalidate()
-    # ---- 3 the switches pipeline (renders from Nautobot) ---------------------------------------------------------------------------------------------
-    log.stage("switches")
-    ok, num, url = Gitea().dispatch_and_wait("evpn-3tier-switches", log)
-    _check(ok, f"evpn-3tier-switches run #{num} failed — {url}")
-    log(f"evpn-3tier-switches run #{num} succeeded (inventory committed, checked, applied, verified): {url}")
-    # ---- 4 the firewalls pipeline: the subnet in PUBLIC (what outside, and so the WAN, learns) -------------------------------
-    log.stage("firewalls")
-    fok, fnum, furl = Gitea().dispatch_and_wait("evpn-3tier-firewalls", log)
-    _check(fok, f"evpn-3tier-firewalls run #{fnum} failed — {furl}")
-    log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid}, the standard ICMP rules {fwrules.rule_number(vid)}): {furl}")
+
+
+def _vlan_checks(r, gw, log):
+    """Step 5: the VLAN and gateway on the switches, the WAN export, the firewalls; returns (inv, ssh, switches)."""
+    p, vid, vrf, vni, _, span, net = _vlan_args(r)
     # ---- 5 on the devices ----------------------------------------------------------------------------------------------------
     log.stage("checks")
     inv, ssh = _lab()
@@ -235,6 +247,25 @@ def add_vlan(r, log):
     log(f"WAN export policy: {', '.join(borders)} permit {net} to the WAN (prefix-list FABRIC-SUBNETS rule {vid}, route-map TO-WAN on the eBGP sessions to the WAN)")
     _fw_and_wan(inv, ssh, vid, net, present=True, log=log)
     _fw_standard(inv, ssh, vid, vrf, net, present=True, log=log)
+    return inv, ssh, switches
+
+
+def add_vlan(r, log):
+    p, vid, vrf, vni, gw, span, net = _vlan_args(r)
+    gw = _vlan_phpipam(r, log); net = ipaddress.ip_interface(gw).network
+    _vlan_nautobot(r, gw, log)
+    _vlan_rules(r, gw, log)
+    # ---- 3 the switches pipeline (renders from Nautobot) ---------------------------------------------------------------------------------------------
+    log.stage("switches")
+    ok, num, url = Gitea().dispatch_and_wait("evpn-3tier-switches", log)
+    _check(ok, f"evpn-3tier-switches run #{num} failed — {url}")
+    log(f"evpn-3tier-switches run #{num} succeeded (inventory committed, checked, applied, verified): {url}")
+    # ---- 4 the firewalls pipeline: the subnet in PUBLIC (what outside, and so the WAN, learns) -------------------------------
+    log.stage("firewalls")
+    fok, fnum, furl = Gitea().dispatch_and_wait("evpn-3tier-firewalls", log)
+    _check(fok, f"evpn-3tier-firewalls run #{fnum} failed — {furl}")
+    log(f"evpn-3tier-firewalls run #{fnum} succeeded (PUBLIC rule {vid}, the standard ICMP rules {fwrules.rule_number(vid)}): {furl}")
+    inv, ssh, switches = _vlan_checks(r, gw, log)
     # ---- 6 the ping test: from the WAN, every web, app and db VM, and the new VLAN's gateway --------------------------------
     log.stage("ping")
     pings = _ping_from_wan(inv, ssh, [(f"VLAN {vid} gateway (leaves)", str(ipaddress.ip_interface(gw).ip))], log)
@@ -422,3 +453,5 @@ EXECUTORS.update({"vlan-span": _changes.vlan_span, "fw-rule": _changes.fw_rule, 
                   "move-server": _changes.move_server, "port": _changes.port_config, "port-profile": _changes.port_profile})
 from . import leafpair as _leafpair                                         # noqa: E402
 EXECUTORS.update({"add-leaf-pair": _leafpair.add_pair, "remove-leaf-pair": _leafpair.remove_pair})
+from . import vrfs as _vrfs                                                 # noqa: E402
+EXECUTORS.update({"add-vrf": _vrfs.add_vrf, "delete-vrf": _vrfs.delete_vrf})

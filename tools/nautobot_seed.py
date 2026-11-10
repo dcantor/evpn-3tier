@@ -51,6 +51,8 @@ def would_discard():
         d = current(old.data); ev = d.get("evpn", {})
         mine = {v["vlan"] for v in EV["vlans"]}
         out += [f"plan VLAN {v['vlan']} ({v['vrf']}, {v['gateway']})" for v in ev.get("vlans", []) if v["vlan"] not in mine]
+        base_vrfs = {v["name"] for v in EV["vrfs"]}
+        out += [f"plan VRF {v['name']} (L3VNI {v['l3vni']}) and its transit" for v in ev.get("vrfs", []) if v["name"] not in base_vrfs]
         lab_rules = [json.dumps(r, sort_keys=True) for r in inv.get("fw_policy", [])]
         out += [f"firewall rule {r['from']} -> {r['to']} {r['dest']} {r['proto']} {r.get('port') or ''}".rstrip()
                 for r in d.get("fw_policy", []) if json.dumps(r, sort_keys=True) not in lab_rules]
