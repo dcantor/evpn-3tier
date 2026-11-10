@@ -12,7 +12,7 @@ const SIZE = { platform: [1012, 624], topology: [1012, 662], evpn: [1012, 498], 
   "asn-db": [2160, 2546], "vlan-db": [2160, 2566],
   "port-form": [2160, 2046], "port-request": [2122, 574],
   "own-apps": [2160, 1590], "own-profiles": [2160, 646],
-  "lp-request": [2160, 612], "vrf-request": [2160, 612], "grow-dash": [2160, 748], "vrf-form": [2160, 1404] };
+  "lp-request": [2160, 612], "vrf-request": [2160, 612], "grow-dash": [2160, 748], "vrf-form": [2160, 1404], "lb-request": [2160, 612], "lb-form": [2160, 1890] };
 const W = 13.333, L = 0.6, R = W - 0.6, CW = R - L; // margins
 const TOP = 1.75, BOT = 6.8;
 
@@ -634,6 +634,28 @@ const TOP = 1.75, BOT = 6.8;
       tb(s, x + 0.85, y + 0.1, w - 1.0, rh - 0.18, hd, b, { hs: 14, bs: 11.5, valign: "top" });
     }
     s.notes("The templates loop over Nautobot's plan, so a VRF is data plus two pipeline runs: switches first without verify, then firewalls with the whole lab verified. Standard Firewall Rules now take their zones from the plan. One extra zone added about 190 lines to each firewall; 20 zones is untested. Tested live: added with VLAN 48, delete refused, VLAN removed, VRF deleted.");
+  }
+
+  // 17h Load balancer pairs
+  {
+    const s = content("Automation and orchestration", "Load balancer pairs", "A highly available pair on the border leaves — active / standby with keepalived VRRP — in the tier you pick");
+    const a = diagram(s, "lb-request", L, TOP, 5.6, 1.6, "Request 70 done: Add load balancer pair lb3 + lb4 (active / standby) in VRF app, every stage complete in 12 minutes 12 seconds");
+    s.text("Request #70: built, verified, failed over live — about twelve minutes", { x: a.x, y: a.y + a.h + 0.03, w: a.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const py = a.y + a.h + 0.35;
+    const pr = diagram(s, "lb-form", L, py, 5.6, BOT - py - 0.28, "The form: Add a new pair, tier app, and the allocated plan shown read-only");
+    s.text("Two choices; the rest allocated", { x: pr.x, y: pr.y + pr.h + 0.03, w: pr.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const x = L + 5.6 + 0.4, w = R - x;
+    const rows = [["LuShieldCheck", C.accent1, "High availability", "Always a pair: keepalived VRRP holds a shared address, the first member active. Every Add runs a live failover — the standby takes over in under half a second."],
+      ["LuHash", C.accent3, "Everything allocated", "The borders' next spare ports, VRID and VRRP address, and per member its address, AS, peering VLAN and /29. BGP + BFD to both borders; no VIPs yet."],
+      ["LuTrash2", C.accent4, "Delete a pair", "The last pair added only; lb1 + lb2 hold the web VIP and cannot go. Two pairs at most (borders eth8-eth11)."]];
+    const gap = 0.12, rh = (BOT - TOP - 2 * gap) / 3;
+    for (const [i, [g, c, hd, b]] of rows.entries()) {
+      const y = TOP + i * (rh + gap);
+      card(s, x, y, w, rh, c, 90);
+      await badge(s, x + 0.2, y + 0.22, 0.5, g, c);
+      tb(s, x + 0.85, y + 0.1, w - 1.0, rh - 0.18, hd, b, { hs: 14, bs: 11.5, valign: "top" });
+    }
+    s.notes("Load balancers are added and deleted in pairs. The pair runs keepalived VRRP (unicast, virtual MAC) on a shared address in the tier's VLAN, which the request extends to the border leaves if needed. Each member is its own Ethernet Segment on both borders and peers with both over eBGP with BFD; with no VIPs the borders accept nothing and HAProxy does not run. The borders got four spare ports (eth8-eth11) once, one border restarted at a time. Tested live (#66-#71): added, failed over (0.3-0.4 s), deleted; reconciled 116/116.");
   }
 
   // 18 Sequence
