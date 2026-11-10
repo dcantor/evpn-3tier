@@ -38,8 +38,11 @@ ensure_networks() {
 }
 
 # ---- point-to-point links (UDP tunnels between VMs) -----------------------------------------------------------------------
-port_local() { echo $(( UDP_BASE + NODE_IDX[$1]*100 + $2 )); }            # the port a NIC listens on when it anchors a link
-port_far()   { echo $(( UDP_BASE + 10000 + NODE_IDX[$1]*100 + $2 )); }    # ...and the one it sends to (the other end listens there)
+port_local() {   # the port a NIC listens on when it anchors a link: nodes 1-20 in UDP_BASE, 21-40 (added leaves) in UDP_BASE2
+  local i=${NODE_IDX[$1]}
+  if (( i <= 20 )); then echo $(( UDP_BASE + i*100 + $2 )); else echo $(( UDP_BASE2 + (i-21)*100 + $2 )); fi
+}
+port_far() { echo $(( $(port_local "$1" "$2") + 10000 )); }   # ...and the one it sends to (the other end listens there)
 node_ports() { seq 1 "${ROLE_PORTS[${ROLE[$1]}]}"; }
 mac() { printf '%s:%02x:%02x' "$MAC_OUI" "${NODE_IDX[$1]}" "$2"; }
 link_peer() {   # node port -> "peer_node peer_port kind end(1|2)" or "" when unwired

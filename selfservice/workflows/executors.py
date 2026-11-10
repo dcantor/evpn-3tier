@@ -420,3 +420,5 @@ EXECUTORS = {"remove-vlan": remove_vlan, "add-vlan": add_vlan, "lb-peering": lb_
 from . import changes as _changes                                           # noqa: E402  (changes.py imports this module's helpers)
 EXECUTORS.update({"vlan-span": _changes.vlan_span, "fw-rule": _changes.fw_rule, "fw-rule-remove": _changes.fw_rule_remove,
                   "move-server": _changes.move_server, "port": _changes.port_config, "port-profile": _changes.port_profile})
+from . import leafpair as _leafpair                                         # noqa: E402
+EXECUTORS.update({"add-leaf-pair": _leafpair.add_pair, "remove-leaf-pair": _leafpair.remove_pair})

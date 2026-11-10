@@ -587,3 +587,56 @@ class PortProfileForm(RequestForm):
         return {"action": c["action"], "name": c["name"], "profile": c["_prof"], "ports": c["_users"],
                 "summary": {"create": "create", "update": "change to", "delete": "delete"}[c["action"]] + ("" if c["action"] == "delete" else " " + profile_summary(c["_prof"]))
                            + (f", re-applied to {len(c['_users'])} port(s)" if c["_users"] else "")}
+
+
+class AddLeafPairForm(RequestForm):
+    """Add a leaf pair: a new rack of two leaves, cabled to both spines. Everything is allocated: the next leaf numbers, AS
+    numbers, addresses and the spines' next spare ports (leafpair.py)."""
+    field_order = ["pair", "reason"]
+    pair = forms.ChoiceField(label="The next leaf pair", help_text="Allocated: the next leaf numbers and rack, their AS numbers, management and loopback addresses, and the spines' next spare ports.")
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        from . import leafpair
+        nxt = leafpair.next_pair()
+        self.fields["pair"].choices = [(",".join(str(x["k"]) for x in nxt), leafpair.pair_label(nxt))] if nxt else [("", "— none: the spines have no spare ports left —")]
+
+    def clean(self):
+        c = super().clean()
+        from . import leafpair
+        nxt = leafpair.next_pair()
+        if not nxt: raise forms.ValidationError("The spines have no spare ports left: at most two pairs can be added (leaf5-leaf8).")
+        if c.get("pair") != ",".join(str(x["k"]) for x in nxt): raise forms.ValidationError("The next pair changed: reload the form.")
+        if _open("add-leaf-pair").exists() or _open("remove-leaf-pair").exists(): raise forms.ValidationError("A leaf-pair request is already open.")
+        free = leafpair.mem_available_mib()
+        if free < 2 * leafpair.RAM_MIB + 2048: raise forms.ValidationError(f"The host has {free} MiB available: two leaves need {2 * leafpair.RAM_MIB} MiB plus 2 GiB headroom.")
+        c.update(ks=[x["k"] for x in nxt], leaves=" + ".join(x["name"] for x in nxt), rack=nxt[0]["rack"])
+        return c
+
+
+class RemoveLeafPairForm(RequestForm):
+    """Remove the last leaf pair added. Refused while a server is cabled to it or a spare port is provisioned."""
+    field_order = ["pair", "confirm", "reason"]
+    pair = forms.ChoiceField(label="Leaf pair", help_text="Only the last pair added can be removed (the leaves keep contiguous numbers, so no address moves).")
+    confirm = forms.CharField(label="Type the rack name to confirm", max_length=20)
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        from . import leafpair
+        last = leafpair.last_pair()
+        self.fields["pair"].choices = [(",".join(str(x["k"]) for x in last), leafpair.pair_label(last))] if last else [("", "— none: no pair has been added —")]
+
+    def clean(self):
+        c = super().clean()
+        from . import leafpair
+        last = leafpair.last_pair()
+        if not last: raise forms.ValidationError("No leaf pair has been added: the original leaves cannot be removed.")
+        if c.get("pair") != ",".join(str(x["k"]) for x in last): raise forms.ValidationError("The last pair changed: reload the form.")
+        if (c.get("confirm") or "").strip() != last[0]["rack"]: raise forms.ValidationError(f"Type {last[0]['rack']} to confirm.")
+        if _open("add-leaf-pair").exists() or _open("remove-leaf-pair").exists(): raise forms.ValidationError("A leaf-pair request is already open.")
+        names = [x["name"] for x in last]
+        if _open("port").filter(parameters__switch__in=names).exists(): raise forms.ValidationError("An open Port Provisioning request uses this pair.")
+        why = leafpair.in_use(names)
+        if why: raise forms.ValidationError("The pair is in use: " + "; ".join(why) + ". Remove the servers / Default the ports first.")
+        c.update(ks=[x["k"] for x in last], leaves=" + ".join(names), rack=last[0]["rack"])
+        return c

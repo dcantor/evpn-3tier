@@ -793,3 +793,64 @@ class PortProfileFormTests(TestCase):
             self.assertEqual(f.params()["ports"], ["leaf1 eth7"])
             f = F.PortProfileForm({"action": "delete", "name": "web-trunk", "reason": "r"}); self.assertFalse(f.is_valid()); self.assertIn("in use on leaf1 eth7", str(f.errors))
         f = F.PortProfileForm({"action": "delete", "name": "web-trunk", "reason": "r"}); self.assertTrue(f.is_valid(), f.errors)
+
+
+class LeafPairTests(TestCase):
+    """Add / Remove a leaf pair: allocation from the leaf number, the next pair, the last pair, the forms' refusals."""
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.dir = Path(tempfile.mkdtemp())
+        p = mock.patch("workflows.leafpair.settings"); s = p.start(); self.addCleanup(p.stop); s.LAB_DIR = self.dir
+        p = mock.patch("workflows.leafpair.mem_available_mib", return_value=20000); p.start(); self.addCleanup(p.stop)
+
+    def racked(self, *leaves):
+        (self.dir / "added-leaves.conf").write_text(f"ADDED_LEAVES=({' '.join(leaves)})\n")
+
+    def test_allocation(self):
+        from . import leafpair as L
+        a = L.allocation(5)
+        self.assertEqual((a["idx"], a["mgmt_ip"], a["loopback"], a["asn"], a["rack"], a["spine_port"], a["console"]),
+                         (21, "10.18.0.25", "10.61.0.15", 65105, "rack3", "eth7", 5641))
+        self.assertEqual((L.allocation(8)["rack"], L.allocation(8)["spine_port"]), ("rack4", "eth10"))
+
+    def test_next_and_last(self):
+        from . import leafpair as L
+        self.assertEqual([a["name"] for a in L.next_pair()], ["leaf5", "leaf6"]); self.assertIsNone(L.last_pair())
+        self.racked("leaf5", "leaf6")
+        self.assertEqual([a["name"] for a in L.next_pair()], ["leaf7", "leaf8"]); self.assertEqual([a["name"] for a in L.last_pair()], ["leaf5", "leaf6"])
+        self.racked("leaf5", "leaf6", "leaf7", "leaf8")
+        self.assertIsNone(L.next_pair()); self.assertEqual([a["name"] for a in L.last_pair()], ["leaf7", "leaf8"])
+
+    def test_add_form(self):
+        f = F.AddLeafPairForm(data={"pair": "5,6", "reason": "a new rack"})
+        self.assertTrue(f.is_valid(), f.errors); self.assertEqual(f.params()["ks"], [5, 6]); self.assertEqual(f.params()["rack"], "rack3")
+        self.racked("leaf5", "leaf6", "leaf7", "leaf8")
+        f = F.AddLeafPairForm(data={"pair": "5,6", "reason": "x"})
+        self.assertFalse(f.is_valid()); self.assertIn("no spare ports left", f.errors.as_text())
+
+    def test_add_form_memory(self):
+        with mock.patch("workflows.leafpair.mem_available_mib", return_value=3000):
+            f = F.AddLeafPairForm(data={"pair": "5,6", "reason": "x"})
+            self.assertFalse(f.is_valid()); self.assertIn("MiB available", f.errors.as_text())
+
+    def test_remove_form(self):
+        f = F.RemoveLeafPairForm(data={"pair": "", "confirm": "rack3", "reason": "x"})
+        self.assertFalse(f.is_valid()); self.assertIn("original leaves cannot be removed", f.errors.as_text())
+        self.racked("leaf5", "leaf6")
+        lab = {**LAB, "ports": [{"switch": "leaf5", "name": "eth3", "kind": None, "enabled": True, "mode": "access", "application": {"app_id": "APP-1042"}},
+                                {"switch": "leaf6", "name": "eth3", "kind": None, "enabled": False, "mode": None}]}
+        with mock.patch("workflows.labmodel.model", return_value=lab):
+            f = F.RemoveLeafPairForm(data={"pair": "5,6", "confirm": "rack9", "reason": "x"})
+            self.assertFalse(f.is_valid()); self.assertIn("Type rack3", f.errors.as_text())
+            f = F.RemoveLeafPairForm(data={"pair": "5,6", "confirm": "rack3", "reason": "x"})
+            self.assertFalse(f.is_valid()); self.assertIn("leaf5 eth3 is provisioned (APP-1042)", f.errors.as_text())
+        lab["ports"][0].update(enabled=False, mode=None, application=None)
+        lab["ports"].append({"switch": "leaf6", "name": "eth4", "kind": "access", "peer": "web3"})
+        with mock.patch("workflows.labmodel.model", return_value=lab):
+            f = F.RemoveLeafPairForm(data={"pair": "5,6", "confirm": "rack3", "reason": "x"})
+            self.assertFalse(f.is_valid()); self.assertIn("web3 is cabled to it", f.errors.as_text())
+        lab["ports"].pop()
+        with mock.patch("workflows.labmodel.model", return_value=lab):
+            f = F.RemoveLeafPairForm(data={"pair": "5,6", "confirm": "rack3", "reason": "x"})
+            self.assertTrue(f.is_valid(), f.errors); self.assertEqual(f.params()["leaves"], "leaf5 + leaf6")

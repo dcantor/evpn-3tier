@@ -23,6 +23,10 @@ set interfaces ethernet eth5 description 'fabric: border1 eth1'
 set interfaces ethernet eth5 mtu 9000
 set interfaces ethernet eth6 description 'fabric: border2 eth1'
 set interfaces ethernet eth6 mtu 9000
+set interfaces ethernet eth7 description 'unwired'
+set interfaces ethernet eth8 description 'unwired'
+set interfaces ethernet eth9 description 'unwired'
+set interfaces ethernet eth10 description 'unwired'
 set protocols bgp system-as 65100
 set protocols bgp parameters router-id 10.61.0.1
 set protocols bgp address-family ipv4-unicast network 10.61.0.1/32

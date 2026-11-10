@@ -17,7 +17,9 @@ What is modelled (everything of this lab lives under the names below; other labs
   config context evpn-3tier (scoped to the location): what Nautobot has no model for — VNIs, anycast MAC, RT AS, MTU,
                ECMP, SVI bases, the transit / wan / sync plan, the web VIP, the firewall policy, ES settings, OOB
 Stale objects it owns (devices in the location, anything in the namespace, VLANs in its group) are removed.
-  NAUTOBOT_TOKEN=... nautobot_seed.py [--url http://10.0.0.10:8080]"""
+Since Fabric Factory changes Nautobot, a seed would discard those changes: it refuses (listing them) unless --reset;
+--check only reports.
+  NAUTOBOT_TOKEN=... nautobot_seed.py [--url http://10.0.0.10:8080] [--check] [--reset]"""
 import argparse, ipaddress, json, os, subprocess, sys
 from pathlib import Path
 import pynautobot, requests
@@ -25,7 +27,10 @@ import pynautobot, requests
 LAB = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LAB / "tools")); from render import _desc   # noqa: E402
 p = argparse.ArgumentParser(); p.add_argument("--url", default=os.environ.get("NAUTOBOT_URL", "http://10.0.0.10:8080"))
-p.add_argument("--token", default=os.environ.get("NAUTOBOT_TOKEN")); a = p.parse_args()
+p.add_argument("--token", default=os.environ.get("NAUTOBOT_TOKEN"))
+p.add_argument("--check", action="store_true", help="report what a seed would discard from Nautobot, change nothing")
+p.add_argument("--reset", action="store_true", help="seed even if that discards self-service changes (Nautobot back to lab.conf)")
+a = p.parse_args()
 if not a.token: sys.exit("NAUTOBOT_TOKEN missing")
 inv = json.loads(subprocess.run([str(LAB / "lab.sh"), "inventory"], capture_output=True, text=True, check=True).stdout)
 raw = subprocess.run(["bash", "-c", 'source "$1"; echo "$ES_SYS_MAC_PREFIX"; echo "${ES_DF_PREF[*]}"; for t in "${TRANSIT[@]}"; do echo "T $t"; done', "-", str(LAB / "lab.conf")],
@@ -34,6 +39,33 @@ ES_PREFIX, ES_DF = raw[0], [int(x) for x in raw[1].split()]
 EV, SITE = inv["evpn"], inv["lab"]; N = {n["name"]: n for n in inv["nodes"]}
 nb = pynautobot.api(a.url, token=a.token); H = {"Authorization": f"Token {a.token}", "Accept": "application/json", "Content-Type": "application/json"}
 changes = []
+
+
+# ---- the safety gate: the seed rebuilds Nautobot from lab.conf — it would discard whatever Fabric Factory added since -------------
+def would_discard():
+    """What a seed would throw away: self-service VLANs, firewall rules, peerings, profiles in the plan; devices lab.conf
+    does not have; provisioned ports. Empty when Nautobot holds nothing beyond lab.conf. Reads only."""
+    out = []
+    old = nb.extras.config_contexts.get(name=SITE)
+    if old is not None:
+        d = current(old.data); ev = d.get("evpn", {})
+        mine = {v["vlan"] for v in EV["vlans"]}
+        out += [f"plan VLAN {v['vlan']} ({v['vrf']}, {v['gateway']})" for v in ev.get("vlans", []) if v["vlan"] not in mine]
+        lab_rules = [json.dumps(r, sort_keys=True) for r in inv.get("fw_policy", [])]
+        out += [f"firewall rule {r['from']} -> {r['to']} {r['dest']} {r['proto']} {r.get('port') or ''}".rstrip()
+                for r in d.get("fw_policy", []) if json.dumps(r, sort_keys=True) not in lab_rules]
+        out += [f"LB peering {x['name']} (AS {x['asn']})" for x in d.get("lb_peerings", [])]
+        out += [f"port profile {x['name']}" for x in d.get("port_profiles", [])]
+    site_ = nb.dcim.locations.get(name=SITE)
+    if site_ is not None:
+        want = {n["domain"] for n in inv["nodes"]}
+        out += [f"device {x.name}" for x in nb.dcim.devices.filter(location=site_.id) if x.name not in want]
+        for x in nb.dcim.interfaces.filter(device=[x.id for x in nb.dcim.devices.filter(location=site_.id)]):
+            if getattr(x, "mode", None) or (x.custom_fields or {}).get("e3t_port_profile"):
+                out.append(f"port settings on {x.device.name} {x.name}")
+    return out
+
+
 
 
 def get_or_create(ep, lookup, **d):
@@ -70,6 +102,14 @@ def patch(path, **f):
 
 
 active = nb.extras.statuses.get(name="Active"); connected = nb.extras.statuses.get(name="Connected")
+
+lost = would_discard()
+if a.check:
+    print("seed would discard:\n  " + "\n  ".join(lost) if lost else "seed would discard nothing: Nautobot holds no change beyond lab.conf"); sys.exit(0)
+if lost and not a.reset:
+    sys.exit("REFUSED: a seed rebuilds Nautobot from lab.conf and would discard these self-service changes:\n  " + "\n  ".join(lost[:40])
+             + (f"\n  ... and {len(lost) - 40} more" if len(lost) > 40 else "") + "\nNothing was changed. To throw them away deliberately: --reset")
+
 
 # ---- location, racks, namespace, tenancy --------------------------------------------------------------------------------
 site = get_or_create(nb.dcim.locations, {"name": SITE}, location_type=nb.dcim.location_types.get(name="Site").id, status=active.id)

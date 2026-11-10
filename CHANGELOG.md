@@ -2,6 +2,27 @@
 
 All notable changes to this lab are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.25.0] - 2026-11-09
+
+### Added
+- **Add a leaf pair** (Fabric Factory workflow): a new rack of two leaves on the running fabric. Everything is allocated
+  from the next leaf number k: index 16+k, mgmt 10.18.0.(20+k), loopback 10.61.0.(10+k), AS 65100+k, rack ceil(k/2),
+  uplinks to spine1 / spine2 eth(2+k). Stages: pre-flight (host memory, the spines' spare ports, nothing allocated in
+  use) -> phpIPAM -> Nautobot (rack, devices, interfaces, addresses, cables) -> rack and cable (the VMs, day-0 over the
+  serial console) -> switches pipeline (whole lab verified) -> checks (BGP + BFD to both spines, the same VNIs and
+  anycast gateways as leaf1, loopbacks reachable) -> ping from the WAN. The new leaves' eth3-eth7 are spare ports for
+  Port Provisioning (disabled). Up to two pairs (leaf5-leaf8).
+- **Remove a leaf pair**: the last pair added; refused while a server is cabled to it or a spare port is provisioned.
+- lab.conf: `added-leaves.conf` (written by the workflow, not in git) holds the added pairs — the hardware inventory;
+  `E3T_PLAN_LEAVES` previews a pair without writing anything.
+- The spines have four spare fabric ports, eth7-eth10 (added once, one spine restarted at a time, verified).
+- `nautobot_seed.py --check`: what a seed would discard. The seed now **refuses** while Nautobot holds self-service
+  changes (VLANs, firewall rules, peerings, profiles, added devices, provisioned ports) unless `--reset`.
+
+### Changed
+- UDP link ports: nodes with index 21-40 (added leaves) use a second block, 40000-41999 / far side 50000-51999
+  (36000-37999's far side belongs to c8000v-dmvpn-lab). Nodes 1-20 keep their ports.
+
 ## [0.24.1] - 2026-11-09
 
 ### Fixed
