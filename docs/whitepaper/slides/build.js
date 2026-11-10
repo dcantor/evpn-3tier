@@ -10,7 +10,8 @@ const SIZE = { platform: [1012, 624], topology: [1012, 662], evpn: [1012, 498], 
   dashboard: [2152, 2090], "nb-devices": [2724, 1880], "nb-prefixes": [2724, 1730], "nb-changelog-crop": [1720, 1064], "nb-graphql": [2752, 1192],
   "nb-interfaces": [2724, 1144], "nb-vlans": [2724, 1608],
   "asn-db": [2160, 2546], "vlan-db": [2160, 2566],
-  "port-form": [2160, 2046], "port-request": [2122, 574] };
+  "port-form": [2160, 2046], "port-request": [2122, 574],
+  "own-apps": [2160, 1590], "own-profiles": [2160, 646] };
 const W = 13.333, L = 0.6, R = W - 0.6, CW = R - L; // margins
 const TOP = 1.75, BOT = 6.8;
 
@@ -566,6 +567,28 @@ const TOP = 1.75, BOT = 6.8;
     const r = diagram(s, "port-request", x, y2 + 0.58, w, BOT - y2 - 0.9, "Request #34 done: pre-flight, Nautobot, switches pipeline, port checks, ping test");
     s.text("Request #34: leaf1 eth6 a trunk for VLANs 41 and 47, about three minutes", { x, y: r.y + r.h + 0.04, w, h: 0.26, fontSize: 11, color: C.text2, margin: 0 });
     s.notes("Every leaf got two spare ports, eth6 and eth7, for this workflow; they start disabled in Nautobot. The intent lives in Nautobot's native interface fields: enabled, mode, untagged VLAN, tagged VLANs and description. The switches pipeline renders disable, native-vlan for access or allowed-vlan per VLAN for a trunk, and its managed deletions remove whatever no longer applies. Tested live: a trunk, then access, then disabled; web1's leg disabled and re-enabled with web1 serving throughout; an uplink change refused.");
+  }
+
+  // 17e Port profiles, owners, Default
+  {
+    const s = content("Automation and orchestration", "Port profiles, owners and Default", "Presets for spare ports, an application and owner team for every provisioned port, one action back to default");
+    const a = diagram(s, "own-apps", L, TOP, 5.6, 3.15, "Applications: APP-1001 Order Desk (Order Desk team), APP-1042 Backup service (Storage team) owning leaf2 eth7");
+    s.text("Applications and their owner teams", { x: a.x, y: a.y + a.h + 0.03, w: a.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const py = a.y + a.h + 0.35;
+    const pr = diagram(s, "own-profiles", L, py, 5.6, BOT - py - 0.28, "Port profiles: backup-trunk, a trunk with VLANs 41 and 47 tagged and 43 untagged, used by leaf2 eth7");
+    s.text("A profile and the port using it", { x: pr.x, y: pr.y + pr.h + 0.03, w: pr.w, h: 0.24, fontSize: 11, color: C.text2, margin: 0 });
+    const x = L + 5.6 + 0.4, w = R - x;
+    const rows = [["LuLayers", C.accent1, "Port profiles", "Named presets — access, or trunk with an optional native VLAN. A change re-applies to every port using it in one request; one in use cannot be deleted."],
+      ["LuUsers", C.accent3, "Owners", "An application (APP-ID, name) and its owner team, in Nautobot. Every enabled spare port needs one; the switch description shows it: 'APP-1042 Backup service — backup appliance'."],
+      ["LuRotateCcw", C.accent4, "Default", "Back to disabled, no VLANs, profile, owner or description — one request."]];
+    const gap = 0.12, rh = (BOT - TOP - 2 * gap) / 3;
+    for (const [i, [g, c, hd, b]] of rows.entries()) {
+      const y = TOP + i * (rh + gap);
+      card(s, x, y, w, rh, c, 90);
+      await badge(s, x + 0.2, y + 0.22, 0.5, g, c);
+      tb(s, x + 0.85, y + 0.1, w - 1.0, rh - 0.18, hd, b, { hs: 14, bs: 11.5, valign: "top" });
+    }
+    s.notes("Profiles live in Nautobot's plan (port_profiles); a port records its profile in a custom field. Applications are Nautobot tenants in their own group with an application ID, the owner team linked by a contact association with the role Owner, and each port linked to its application by a Nautobot relationship. Ownership is recorded, not enforced yet. Tested live: a profile created, a port put on it for APP-1042, the profile changed and re-applied, the port defaulted and the profile deleted.");
   }
 
   // 18 Sequence
